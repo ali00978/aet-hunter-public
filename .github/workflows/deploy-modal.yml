@@ -1,0 +1,29 @@
+name: Deploy owner-controlled Modal scanner (never scan on GitHub)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run local wrapper checks before deployment
+        run: |
+          python -m py_compile ops/modal/hunter_modal.py ops/modal/legacy_bridge.py
+          python -m unittest -v test_modal_bridge.py
+      - name: Install Modal deployment client
+        run: python -m pip install 'modal>=1.0,<2'
+      - name: Deploy to the private Modal workspace
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          test -n "$MODAL_TOKEN_ID" && test -n "$MODAL_TOKEN_SECRET"
+          modal deploy ops/modal/hunter_modal.py

@@ -15,7 +15,7 @@ socket.getaddrinfo = block_network
 
 suite = unittest.defaultTestLoader.loadTestsFromNames(
     ["test_hunter", "test_marktplaats", "test_marktplaats_potential",
-     "test_facebook_vehicle_filter", "test_facebook_hunter"]
+     "test_facebook_vehicle_filter", "test_facebook_hunter", "test_modal_bridge"]
 )
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 sys.exit(0 if result.wasSuccessful() else 1)
