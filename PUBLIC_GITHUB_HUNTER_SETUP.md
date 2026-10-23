@@ -123,6 +123,25 @@ current desired two-hour frequency would reach that cap long before the
 month ends. Adapt scheduling responsibly and review the Actor's live pricing
 before activating anything.
 
+## Manually audit saved private Hunter results without scans
+
+`.github/workflows/verify-private-snapshot-readonly.yml` reads strictly
+the current private `hunter_pro_combined.json`, two source status files and
+`apify_budget.json` plus repository permission metadata using only
+authenticated GitHub API **GET** requests.
+
+The public logs contain aggregate counts, validation results and the age
+of the stored scans, but never candidate titles, links, names, token values,
+full private JSON responses or API credentials. This does not check live
+Marktplaats/Facebook inventory or publish any records to AET Pro. If both
+status files are older than 4 hours, the output explicitly says
+**HISTORICAL ONLY**. A green integrity test does not mean that the scanner
+is currently running.
+
+If GitHub repository metadata shows `permissions.push=true`, this is an
+*indication* of repository role, **not proof** the fine-grained token can
+push protected files to main. No write request is made by this check.
+
 ## Limitations and risks
 
 - No external host is required, but public Actions runs are visible to anyone.

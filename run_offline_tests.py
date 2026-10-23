@@ -18,7 +18,8 @@ suite = unittest.defaultTestLoader.loadTestsFromNames(
      "test_facebook_vehicle_filter", "test_facebook_hunter", "test_modal_bridge",
      "test_public_actions", "test_connection_preflight",
      "test_readonly_connection_check",
-     "test_aet_pro_handshake", "test_apify_actor_readiness"]
+     "test_aet_pro_handshake", "test_apify_actor_readiness",
+     "test_private_snapshot_preflight"]
 )
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 sys.exit(0 if result.wasSuccessful() else 1)
