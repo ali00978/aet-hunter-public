@@ -38,6 +38,10 @@ jobs:
           python-version: '3.12'
       - name: Install authenticated encryption library
         run: python -m pip install 'cryptography>=45,<50'
+      - name: Validate public code and offline regression tests
+        run: |
+          python public_guard.py
+          python run_offline_tests.py
       - uses: actions/cache/restore@v4
         with:
           path: .aet-secure-state/state.enc
@@ -77,6 +81,10 @@ jobs:
           python-version: '3.12'
       - name: Install authenticated encryption library
         run: python -m pip install 'cryptography>=45,<50'
+      - name: Validate public code and offline regression tests
+        run: |
+          python public_guard.py
+          python run_offline_tests.py
       - uses: actions/cache/restore@v4
         with:
           path: .aet-secure-state/state.enc

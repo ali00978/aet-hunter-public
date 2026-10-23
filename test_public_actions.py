@@ -145,6 +145,8 @@ class PublicGithubRunnerTests(unittest.TestCase):
         self.assertIn("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'", content)
         self.assertIn("vars.AET_GITHUB_TERMS_APPROVED == 'true'", content)
         self.assertNotIn("  push:", content)
+        self.assertEqual(content.count("python public_guard.py"),2)
+        self.assertEqual(content.count("python run_offline_tests.py"),2)
         self.assertIn("actions/cache/restore@v4", content)
         self.assertIn("actions/cache/save@v4", content)
         self.assertIn("python -m ops.github.standalone_hunter_runner", content)

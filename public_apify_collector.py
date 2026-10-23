@@ -11,9 +11,9 @@ import json
 import math
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -29,6 +29,11 @@ DEFAULT_MAX_RUN_USD = 0.05
 ACCOUNT_HEADROOM_CUSHION_USD = 0.30
 COOLDOWN_FILE = "apify_backoff.json"
 ONE_TIME_RETRY_FILE = "apify_retry_once.json"
+PENDING_ACTOR_FILE = "apify_pending.json"
+ACTOR_INFO = "https://api.apify.com/v2/actors/" + ACTOR
+ACTOR_RUNS = "https://api.apify.com/v2/actor-runs"
+PENDING_WINDOW_BEFORE = timedelta(minutes=2)
+PENDING_WINDOW_AFTER = timedelta(minutes=5)
 ACCOUNT_LIMITS = "https://api.apify.com/v2/users/me/limits"
 ACCOUNT_PLAN = "https://api.apify.com/v2/users/me"
 
@@ -356,7 +361,145 @@ def fetch_actor(token, cap, opener=None, now=None):
     return data[:MAX_ITEMS_PER_RUN]
 
 
-def collect(root, env, persist, request_fn=None, now=None, account_check=None):
+def read_only_provider_get(url, token, opener=None):
+    """Bounded Apify GET; never visit an arbitrary URL with the API token."""
+    from urllib.parse import parse_qs
+    import re
+    parsed = urlsplit(url)
+    safe_host = (parsed.scheme == "https" and parsed.netloc == "api.apify.com"
+                 and not (parsed.username or parsed.password or parsed.fragment))
+    if not safe_host:
+        raise ValueError("Unapproved Apify recovery destination")
+    path = parsed.path
+    if url == ACTOR_INFO:
+        pass
+    elif path == "/v2/actor-runs":
+        opts = parse_qs(parsed.query)
+        if (set(opts) != {"limit","desc","startedAfter","startedBefore"}
+                or opts["limit"] != ["50"] or opts["desc"] != ["1"]):
+            raise ValueError("Unapproved Apify run-list query")
+        for key in ("startedAfter","startedBefore"):
+            if len(opts[key]) != 1 or not re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z",
+                    opts[key][0]):
+                raise ValueError("Unapproved Apify run search timestamp")
+    elif re.fullmatch(r"/v2/actor-runs/[A-Za-z0-9]{8,35}",path):
+        if parsed.query:
+            raise ValueError("Unapproved Apify run details query")
+    elif re.fullmatch(r"/v2/datasets/[A-Za-z0-9]{8,35}/items",path):
+        if parsed.query != "format=json&limit=80&clean=1":
+            raise ValueError("Unapproved Apify dataset query")
+    else:
+        raise ValueError("Unapproved Apify recovery endpoint")
+    request = Request(url, method="GET", headers={
+        "Authorization": "Bearer " + token.strip(),
+        "Accept": "application/json",
+        "User-Agent": "AET-Hunter-ReadOnly-Provider-Recovery/1",
+    })
+    opener = opener or build_opener(NoRedirect())
+    with opener.open(request, timeout=15) as reply:
+        if reply.status != 200:
+            raise ValueError("Apify recovery GET unsuccessful")
+        raw = reply.read(1_500_001)
+    if len(raw) > 1_500_000:
+        raise ValueError("Apify recovery response too large")
+    return json.loads(raw.decode("utf-8"))
+
+
+def recover_uncertain_run(token, marker, getter=None):
+    """No new actor starts. Identify ONE old billed run or fail closed.
+
+    A timeout on Apify's synchronous endpoint does NOT mean the Actor failed.
+    The next scan attempts bounded GET-only reconciliation before considering
+    a second payable POST. Multiple matching runs are deliberately ambiguous.
+    """
+    import re
+    getter = getter or read_only_provider_get
+    if not isinstance(marker,dict) or marker.get("actor") != ACTOR:
+        raise ValueError("Invalid pending Apify Actor marker")
+    try:
+        started = datetime.fromisoformat(marker["started_at"].replace("Z","+00:00"))
+    except (KeyError, ValueError, AttributeError, TypeError):
+        raise ValueError("Invalid pending Apify Actor time") from None
+    if started.tzinfo is None:
+        raise ValueError("Pending actor timestamp lacks timezone")
+    now = datetime.now(timezone.utc)
+    if started > now + timedelta(minutes=15):
+        raise ValueError("Pending actor timestamp is in the future")
+    started = started.astimezone(timezone.utc)
+    fmt = lambda moment: moment.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    actor = getter(ACTOR_INFO, token)
+    details = actor.get("data") if isinstance(actor,dict) else None
+    actor_id = details.get("id") if isinstance(details,dict) else None
+    if not isinstance(actor_id,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",actor_id):
+        raise ValueError("Apify Actor identity could not be verified")
+    query = urlencode({"limit":50,"desc":1,
+                       "startedAfter":fmt(started-PENDING_WINDOW_BEFORE),
+                       "startedBefore":fmt(started+PENDING_WINDOW_AFTER)})
+    runs = getter(ACTOR_RUNS+"?"+query, token)
+    payload = runs.get("data") if isinstance(runs,dict) else None
+    rows = payload.get("items") if isinstance(payload,dict) else None
+    if not isinstance(rows,list) or len(rows)>=50:
+        raise ValueError("Unverifiable Apify run search")
+    matching = []
+    for row in rows:
+        if not isinstance(row,dict) or row.get("actId") != actor_id:
+            continue
+        try:
+            dt = datetime.fromisoformat(row["startedAt"].replace("Z","+00:00"))
+        except (KeyError, ValueError, AttributeError, TypeError):
+            continue
+        if dt.tzinfo and started-PENDING_WINDOW_BEFORE <= dt <= started+PENDING_WINDOW_AFTER:
+            matching.append(row)
+    if len(matching) != 1:
+        return "unresolved", None
+    id_ = matching[0].get("id")
+    if not isinstance(id_,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",id_):
+        raise ValueError("Invalid Apify run reference")
+    full = getter(ACTOR_RUNS+"/"+id_,token)
+    run = full.get("data") if isinstance(full,dict) else None
+    if not isinstance(run,dict) or run.get("id") != id_ or run.get("actId") != actor_id:
+        raise ValueError("Mismatched Apify run details")
+    status = run.get("status")
+    if status == "SUCCEEDED":
+        data_id = run.get("defaultDatasetId")
+        if not isinstance(data_id,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",data_id):
+            raise ValueError("Apify completed run lacks dataset")
+        restored = getter("https://api.apify.com/v2/datasets/"+data_id+
+                          "/items?format=json&limit=80&clean=1",token)
+        if not isinstance(restored,list) or len(restored)>MAX_ITEMS_PER_RUN:
+            raise ValueError("Apify recovered dataset format invalid")
+        return "recovered", restored
+    if status in ("READY","RUNNING","TIMING-OUT"):
+        return "pending", None
+    if status in ("FAILED","ABORTED","TIMED-OUT"):
+        return "failed", None
+    return "unresolved", None
+
+
+def load_pending_actor(root):
+    path = Path(root) / PENDING_ACTOR_FILE
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError):
+        raise ValueError("Unreadable pending Apify Actor state") from None
+    if not isinstance(data,dict) or data.get("actor") != ACTOR:
+        raise ValueError("Corrupt pending Apify Actor state")
+    time_value = data.get("started_at")
+    if not isinstance(time_value,str) or len(time_value)>60:
+        raise ValueError("Invalid pending Apify timestamp")
+    try:
+        moment = datetime.fromisoformat(time_value.replace("Z","+00:00"))
+    except ValueError:
+        raise ValueError("Invalid pending Apify timestamp") from None
+    if moment.tzinfo is None:
+        raise ValueError("Pending Apify timestamp lacks timezone")
+    return data
+
+
+def collect(root, env, persist, request_fn=None, now=None, account_check=None, recovery_fn=None):
     """Fail closed without losing good history or resetting charge counters."""
     import facebook_hunter
     now = now or datetime.now(timezone.utc)
@@ -370,55 +513,101 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
     status = {"checked_at": now.isoformat(), "status": "preflight_failed",
               "provider": "Apify HydeData"}
 
-    # The one-off exception applies ONLY to a prior 2-hour input/network
-    # cooldown. It never bypasses a recorded HTTP account restriction.
-    retry_exception = False
+    recovered_rows = None
     try:
-        if active_backoff(root, now):
-            if permitted_nonrestrictive_retry(root, env, now):
-                retry_exception = True
-            else:
-                status["status"] = "provider_cooldown"
-                atomic_json(root / "apify_status.json", status)
-                persist()
-                return status
-        if account_check is None:
-            verify_free_headroom(token, cap)
-        else:
-            account_check(token, cap)
-    except ValueError as error:
-        # The only externally visible diagnostic is one of these fixed
-        # codes. Never log tokens, raw API responses, or credit amounts.
-        reason = str(error)
-        allowed_reasons = ("apify_balance_format_unknown",
-                           "apify_account_data_unknown",
-                           "apify_included_credit_unknown",
-                           "apify_free_monthly_reserve_exhausted",
-                           "apify_remaining_included_credit_low")
-        status["preflight_reason"] = (
-            reason if reason in allowed_reasons else "provider_gate_unknown")
-        atomic_json(root / "apify_status.json", status)
-        persist()
-        return status
-
-    try:
-        reserve(root, env, persist, now=now)
+        pending = load_pending_actor(root)
     except ValueError:
-        status["status"] = "budget_cap_reached"
-        atomic_json(root / "apify_status.json", status)
+        status["status"] = "provider_pending"
+        status["preflight_reason"] = "pending_state_corrupt"
+        atomic_json(root / "apify_status.json",status)
         persist()
         return status
+    if pending is not None:
+        # This is GET-only and runs before quota/backoff checks. It cannot
+        # launch or charge a second Actor while the prior POST is uncertain.
+        try:
+            recovery_state, recovered_rows = (
+                recovery_fn(token,pending) if recovery_fn
+                else recover_uncertain_run(token,pending))
+        except (ValueError, HTTPError, URLError, TimeoutError, OSError,
+                TypeError, KeyError, UnicodeError):
+            recovery_state, recovered_rows = "unresolved", None
+        if recovery_state == "failed":
+            (root / PENDING_ACTOR_FILE).unlink(missing_ok=True)
+            set_backoff(root,now)
+            status["status"] = "provider_run_failed"
+            atomic_json(root / "apify_status.json",status)
+            persist()
+            return status
+        if recovery_state != "recovered" or not isinstance(recovered_rows,list):
+            status["status"] = "provider_pending"
+            status["preflight_reason"] = "awaiting_existing_actor"
+            atomic_json(root / "apify_status.json",status)
+            persist()
+            return status
+        status["recovered_existing"] = True
+        # The existing actor has already been billed and reserved. Reuse
+        # its returned records without a new reserve(), POST or spend.
 
-    if retry_exception:
-        # Must be durable before the potentially billable request begins:
-        # no second exception, even on timeout or process termination.
-        atomic_json(root / ONE_TIME_RETRY_FILE,
-                    {"used_at": now.isoformat(),
-                     "reason": "one_corrected_input_test"})
-        persist()
+    if recovered_rows is None:
+        # The one-off exception applies ONLY to a prior 2-hour input/network
+        # cooldown. It never bypasses a recorded HTTP account restriction.
+        retry_exception = False
+        try:
+            if active_backoff(root, now):
+                if permitted_nonrestrictive_retry(root, env, now):
+                    retry_exception = True
+                else:
+                    status["status"] = "provider_cooldown"
+                    atomic_json(root / "apify_status.json", status)
+                    persist()
+                    return status
+            if account_check is None:
+                verify_free_headroom(token, cap)
+            else:
+                account_check(token, cap)
+        except ValueError as error:
+            # The only externally visible diagnostic is one of these fixed
+            # codes. Never log tokens, raw API responses, or credit amounts.
+            reason = str(error)
+            allowed_reasons = ("apify_balance_format_unknown",
+                               "apify_account_data_unknown",
+                               "apify_included_credit_unknown",
+                               "apify_free_monthly_reserve_exhausted",
+                               "apify_remaining_included_credit_low")
+            status["preflight_reason"] = (
+                reason if reason in allowed_reasons else "provider_gate_unknown")
+            atomic_json(root / "apify_status.json", status)
+            persist()
+            return status
+
+        try:
+            reserve(root, env, persist, now=now)
+        except ValueError:
+            status["status"] = "budget_cap_reached"
+            atomic_json(root / "apify_status.json", status)
+            persist()
+            return status
+
+        if retry_exception:
+            # Must be durable before the potentially billable request begins:
+            # no second exception, even on timeout or process termination.
+            atomic_json(root / ONE_TIME_RETRY_FILE,
+                        {"used_at": now.isoformat(),
+                         "reason": "one_corrected_input_test"})
+            persist()
     status["status"] = "request_failed"
+    if recovered_rows is None:
+        # Save the uncertain Actor start BEFORE the potentially billable POST.
+        # Even a process crash or HTTP timeout must not trigger a duplicate
+        # paid call on the next scheduled scan.
+        atomic_json(root / PENDING_ACTOR_FILE,
+                    {"actor":ACTOR, "started_at":now.isoformat()})
+        persist()
     try:
-        rows = request_fn(token, cap) if request_fn else fetch_actor(token, cap, now=now)
+        rows = (recovered_rows if recovered_rows is not None else
+                (request_fn(token, cap) if request_fn
+                 else fetch_actor(token, cap, now=now)))
         if not rows:
             # Zero results can signal provider/API breakage; do not erase the
             # previous saved candidates or synchronize an empty Facebook feed.
@@ -509,6 +698,12 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
         status.update({"status": "request_failed", "error_type": type(error).__name__})
         set_backoff(root, now)
     finally:
+        completed = status.get("status") in (
+            "ok", "empty_response", "no_vehicle_candidates")
+        definite_http_rejection = (status.get("status") == "http_error" and
+            status.get("http_status") in (400, 401, 402, 403, 404, 422, 429))
+        if completed or definite_http_rejection:
+            (root / PENDING_ACTOR_FILE).unlink(missing_ok=True)
         atomic_json(root / "apify_status.json", status)
         persist()
     return status

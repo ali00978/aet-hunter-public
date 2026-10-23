@@ -87,6 +87,34 @@ def safe_scan_counters(status):
     return tuple(values)
 
 
+def durable_scan_identity(env):
+    """Use GitHub's stable job identity instead of a fresh nanosecond ID.
+
+    The same run/attempt should always produce the same AET Pro scan key,
+    including if the network sync is retried. Standalone dry-runs retain
+    the legacy timestamp fallback.
+    """
+    run_id = str(env.get("GITHUB_RUN_ID") or "")
+    attempt = str(env.get("GITHUB_RUN_ATTEMPT") or "1")
+    if run_id.isascii() and run_id.isdigit() and 1 <= len(run_id) <= 20 and (
+            attempt.isascii() and attempt.isdigit() and 1 <= len(attempt) <= 5):
+        return run_id, attempt
+    return str(time.time_ns()), "1"
+
+
+def provider_status_label(status):
+    """Safe aggregate information only, never attacker-supplied strings."""
+    if not isinstance(status,dict):
+        return "invalid_status"
+    allowed = {
+        "ok", "empty_response", "no_vehicle_candidates", "request_failed",
+        "preflight_failed", "budget_cap_reached", "provider_cooldown",
+        "http_error", "provider_pending", "provider_run_failed", "disabled"
+    }
+    value = status.get("status")
+    return value if isinstance(value,str) and value in allowed else "unknown"
+
+
 def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
     env = env if env is not None else os.environ
     if platform not in ("marktplaats", "facebook"):
@@ -136,6 +164,9 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             from public_apify_collector import collect
             status = collect(root, env, persist)
             healthy = status.get("status") == "ok"
+        if platform == "facebook":
+            print("facebook: provider_status=" + provider_status_label(status),
+                  flush=True)
         print(platform + ": healthy=" + str(healthy))
         if not healthy:
             return "unhealthy"
@@ -153,9 +184,9 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         combined = hunter_pro_combined.write(
             path=root / "hunter_pro_combined.json", now=now)
         persist()
-        run_id = str(time.time_ns())
+        run_id, attempt = durable_scan_identity(env)
         package = hunter_sync.envelope(
-            source, run_id, "1", now=now,
+            source, run_id, attempt, now=now,
             combined=combined, source_status=status)
         # No candidate URLs, details, credentials, or endpoint responses logged.
         answer = hunter_sync.send(package, endpoint, token)

@@ -136,6 +136,25 @@ class GithubStandaloneTests(unittest.TestCase):
             self.assertEqual(gh.unseal(path.read_bytes(), TOKEN)["files"]
                              ["marktplaats_cooldown.json"]["__global_backoff_until__"], 2000000000)
 
+    def test_encrypted_pending_actor_is_retained_across_runs(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "state.enc"
+            env = {**ENV,"AET_STATE_BOOTSTRAP":"true",
+                   "AET_ENCRYPTED_STATE_PATH":str(path)}
+            def crashed(platform,env,persist,reload):
+                root = Path(env["AET_HUNTER_STATE_DIR"])
+                (root / "apify_pending.json").write_text(json.dumps({
+                    "actor":"hydedata~facebook-marketplace-scraper",
+                    "started_at":"2026-10-23T18:20:00+00:00"}))
+                persist()
+                raise TimeoutError("Simulated uncertain provider response")
+            with self.assertRaises(TimeoutError):
+                gh.execute(env=env,platform_runner=crashed)
+            saved=gh.unseal(path.read_bytes(),TOKEN)["files"]
+            self.assertIn("apify_pending.json",saved)
+            self.assertEqual(saved["apify_pending.json"]["actor"],
+                             "hydedata~facebook-marketplace-scraper")
+
     def test_facebook_cannot_bootstrap_missing_budget(self):
         with tempfile.TemporaryDirectory() as scratch:
             env = {**ENV, "AET_HUNTER_PLATFORM": "facebook",

@@ -41,6 +41,7 @@ STATE_FILES = frozenset((
     "apify_budget.json",
     "apify_backoff.json",
     "apify_retry_once.json",
+    "apify_pending.json",
     "apify_recovery_once.json",
     "facebook_quality_replay_once.json",
     "apify_kandidaten.json",

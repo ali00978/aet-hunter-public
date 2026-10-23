@@ -51,6 +51,19 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.run_platform("marktplaats", env={}), "disabled")
         self.assertEqual(runtime.run_platform("facebook", env={}), "disabled")
 
+    def test_scan_ids_stable_within_github_run_and_private_status_sanitized(self):
+        cfg={"GITHUB_RUN_ID":"456789123", "GITHUB_RUN_ATTEMPT":"2"}
+        self.assertEqual(runtime.durable_scan_identity(cfg),("456789123","2"))
+        self.assertEqual(runtime.durable_scan_identity(cfg),("456789123","2"))
+        invalid={"GITHUB_RUN_ID":"123abc","GITHUB_RUN_ATTEMPT":"1"}
+        ident=runtime.durable_scan_identity(invalid)
+        self.assertTrue(ident[0].isdigit())
+        self.assertEqual(ident[1],"1")
+        self.assertEqual(runtime.provider_status_label({"status":"provider_pending"}),
+                         "provider_pending")
+        self.assertEqual(runtime.provider_status_label({
+            "status":"https://untrusted.example/secrets"}),"unknown")
+
     def test_pro_endpoint_rejects_other_origins_and_token_in_url(self):
         token = "x" * 26
         good = "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync"

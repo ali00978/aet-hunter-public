@@ -94,6 +94,8 @@ if ("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'" not in owner_workflow
         or "AET_HUNTER_PLATFORM: facebook" not in owner_workflow
         or "inputs.platform == 'marktplaats'" not in owner_workflow
         or "inputs.platform == 'facebook'" not in owner_workflow
+        or owner_workflow.count("python public_guard.py") != 2
+        or owner_workflow.count("python run_offline_tests.py") != 2
         or "actions/cache/restore@v4" not in owner_workflow
         or "actions/cache/save@v4" not in owner_workflow
         or "python -m ops.github.standalone_hunter_runner" not in owner_workflow
