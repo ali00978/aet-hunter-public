@@ -25,6 +25,11 @@ jobs:
           python public_guard.py
           python -m unittest -v test_public_hunter_runtime.py
           python -m py_compile ops/modal/public_hunter_modal.py public_hunter_runtime.py public_apify_collector.py hunter_feed.py hunter_pro_export.py hunter_pro_combined.py hunter_sync.py
+      - name: Verify genuine AET Pro token without uploading any vehicle
+        env:
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+        run: python -m ops.github.aet_pro_handshake
       - name: Report missing hosting and sync credentials without showing values
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
@@ -44,11 +49,6 @@ jobs:
             echo "Production NOT started; add the named secrets privately in GitHub Settings."
             exit 1
           fi
-      - name: Verify genuine AET Pro token without uploading any vehicle
-        env:
-          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
-          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
-        run: python -m ops.github.aet_pro_handshake
       - name: Install Modal deployment client
         run: python -m pip install 'modal>=1.0,<2'
       - name: Create isolated private Modal Secret from existing GitHub secrets
