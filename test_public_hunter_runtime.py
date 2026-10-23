@@ -360,6 +360,39 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertEqual(status["status"], "empty_response")
             self.assertGreaterEqual(len(order), 2)
 
+    def test_real_hydedata_output_includes_photo_and_private_seller(self):
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        photo = "https://scontent-ams2-1.xx.fbcdn.net/v/t1/opel.jpg"
+        now = datetime.now(timezone.utc)
+        samples = [
+            {"id": "1234567",
+             "url": "https://www.facebook.com/marketplace/item/1234567/",
+             "title": "Opel Corsa 2012", "price": 1250,
+             "listedAt": now.isoformat(), "photoUrl": photo,
+             "sellerType": "PRIVATE_SELLER"},
+            {"id": "2222222",
+             "url": "https://www.facebook.com/marketplace/item/2222222/",
+             "title": "Fiat Punto 2009", "price": 600,
+             "listedAt": now.isoformat(), "sellerType": "DEALER"},
+            {"id": "3333333",
+             "url": "https://www.facebook.com/marketplace/item/3333333/",
+             "title": "Toyota Aygo 2013", "price": 1800,
+             "listedAt": now.isoformat(), "isSold": True},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            status = apify.collect(d, env, lambda: None,
+                request_fn=lambda *_: samples, now=now,
+                account_check=lambda *_: True)
+            self.assertEqual(status["status"], "ok")
+            self.assertEqual(status["accepted"], 1)
+            cars = json.loads((Path(d) / "apify_kandidaten.json").read_text())
+            self.assertEqual(len(cars), 1)
+            self.assertEqual(cars[0]["seller_type"], "particulier")
+            self.assertEqual(cars[0]["photo_urls"], [photo])
+
+
+
 
 if __name__ == "__main__":
     unittest.main()

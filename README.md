@@ -35,6 +35,15 @@ HTTP-429-cooldowns en geldige oude resultaten blijven beschermd.
 De gepubliceerde Actor-prijs is een vanafprijs, geen
 gegarandeerde maandkost.
 
+**Eenmalige ontwikkeltest:** `.github/workflows/facebook-one-time-integration.yml`
+is geen terugkerende scraper. Alleen de expliciete test-commit kan één
+Facebook Actor-start van maximaal $0,06 proberen met opgeslagen,
+versleutelde scanstatus, en daarna AET Pro synchroniseren als er geldige
+auto's zijn. Er zijn geen handmatige/periodieke triggers voor deze test;
+`GITHUB_RUN_ATTEMPT=1` beschermt tegen onbedoelde reruns. Bij een fout
+blijft een gereserveerde Actor-aanroep meetellen en wordt niet opnieuw
+gestart. Dit is alleen voor integratieverificatie.
+
 **Plan B:** Modal met privé-volume staat voorbereid in
 `ops/modal/public_hunter_modal.py`. Een externe host is niet verplicht voor
 de developmenttests. De oude privé-repository, privé-Actions en haar opgeslagen

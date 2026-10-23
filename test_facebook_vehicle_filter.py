@@ -49,6 +49,11 @@ class FacebookAutomotiveClassificationTests(unittest.TestCase):
                        {"imageUrl":"https://notfbcdn.net/a.jpg"}],
              "thumbnailUrl":"https://example.com/evil.jpg"}
         self.assertEqual(provider_photos(raw),["https://scontent-ams2-1.xx.fbcdn.net/v/t39/abc.jpg?stp=123"])
+    def test_real_hydedata_photo_url_is_recognized(self):
+        url = "https://scontent-ams2-1.xx.fbcdn.net/v/t1/auto.jpg"
+        self.assertEqual(provider_photos({"photoUrl": url}), [url])
+        self.assertEqual(provider_photos({"photoUrl": "https://attacker.invalid/a.jpg"}), [])
+
     def test_empty_when_provider_does_not_supply_photo(self):
         self.assertEqual(provider_photos({"image":None,"photos":[]}),[])
 if __name__=="__main__":unittest.main()

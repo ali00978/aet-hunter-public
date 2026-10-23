@@ -263,12 +263,14 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
                        "listedAt", "listed_at", "year", "year_detected",
                        "mileage_km", "mileage", "seller_type", "description",
                        "photo_urls", "images", "photos", "pictures",
-                       "imageUrls", "photoUrls", "image", "imageUrl",
+                       "imageUrls", "photoUrls", "photoUrl", "image", "imageUrl",
                        "image_url", "thumbnailUrl", "thumbnail", "photo",
                        "picture", "primaryImage", "coverPhoto", "mainImage",
                        "listingImage")
             for raw in rows:
                 if not isinstance(raw, dict):
+                    continue
+                if raw.get("isSold") is True or raw.get("isPending") is True:
                     continue
                 url = raw.get("url")
                 if not isinstance(url, str) or len(url) > 600:
@@ -278,6 +280,11 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
                 if isinstance(normalized.get("description"), str):
                     normalized["description"] = normalized["description"][:600]
                 normalized["first_seen_at"] = first_seen or now.isoformat()
+                provider_seller = str(raw.get("sellerType") or "").upper()
+                if provider_seller == "PRIVATE_SELLER":
+                    normalized["seller_type"] = "particulier"
+                elif provider_seller in ("DEALER", "DEALERSHIP", "BUSINESS_SELLER"):
+                    normalized["seller_type"] = "handelaar"
                 car = facebook_hunter.normalize(normalized, "Apify", now,
                                                  provider_at=now)
                 if car is None:

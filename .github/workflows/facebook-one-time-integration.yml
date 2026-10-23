@@ -1,0 +1,72 @@
+name: AET Facebook one-time live integration to AET Pro
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/facebook-one-time-integration.yml'
+
+permissions:
+  contents: read
+
+# Share the existing private cache-lock. Never launch in parallel with
+# another public Hunter scan or reset the cached Apify spending counters.
+concurrency:
+  group: aet-public-original-hunter
+  cancel-in-progress: false
+
+jobs:
+  offline-integration-tests:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'test: one-time Facebook Apify integration to AET Pro' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install encrypted state testing package
+        run: python -m pip install 'cryptography>=45,<50'
+      - name: Test public Hunter offline first
+        run: python run_offline_tests.py
+      - name: Verify public source and secret guard
+        run: python public_guard.py
+
+  facebook-integration:
+    needs: offline-integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install encrypted private-state dependency
+        run: python -m pip install 'cryptography>=45,<50'
+      - name: Restore only authenticated encrypted scanner history
+        uses: actions/cache/restore@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            aet-hunter-state-v1-
+      - name: Test ONE capped Apify Facebook scan and sync to AET Pro
+        id: test
+        env:
+          AET_ONE_TIME_FACEBOOK_TEST: I_REQUESTED_ONE_TEST
+          AET_FACEBOOK_ENABLED: 'true'
+          AET_APIFY_MONTHLY_BUDGET_USD: '4.00'
+          AET_APIFY_MAX_CHARGE_USD: '0.06'
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+        run: python -m ops.github.facebook_live_once
+      - name: Persist encrypted cooldown and spending even if a run fails
+        if: ${{ always() && steps.test.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}

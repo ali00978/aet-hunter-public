@@ -101,7 +101,7 @@ def provider_photos(raw):
     found=[]
     seen=set()
     fields=("photo_urls","images","photos","pictures","imageUrls","photoUrls",
-            "image","imageUrl","image_url","thumbnailUrl","thumbnail",
+            "image","imageUrl","photoUrl","image_url","thumbnailUrl","thumbnail",
             "photo","picture","primaryImage","coverPhoto","mainImage","listingImage")
     def add(value,depth=0):
         if depth>3 or len(found)>=4:

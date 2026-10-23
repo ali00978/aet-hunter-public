@@ -35,6 +35,8 @@ ALLOW = {
     "test_public_hunter_runtime.py", "ops/modal/public_hunter_modal.py",
     "PUBLIC_STANDALONE_SETUP.md",
     "ops/github/standalone_hunter_runner.py", "test_github_standalone.py",
+    "ops/github/facebook_live_once.py", "test_facebook_live_once.py",
+    ".github/workflows/facebook-one-time-integration.yml",
     ".github/workflows/marktplaats-one-time-integration.yml",
     "ops/github/public_marktplaats_integration.py",
     "ops/github/private_pr_offline_validation.py",
@@ -174,6 +176,24 @@ if ("  workflow_dispatch:" not in private_pr_workflow
         or "secrets.APIFY_TOKEN" in private_pr_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" in private_pr_workflow):
     raise SystemExit("Private PR validation must be owner/main manual and never run paid providers")
+facebook_once_workflow = Path(".github/workflows/facebook-one-time-integration.yml").read_text(encoding="utf-8")
+if (not all(word in facebook_once_workflow for word in (
+        "github.repository == 'ali00978/aet-hunter-public'",
+        "github.ref == 'refs/heads/main'",
+        "github.event.head_commit.message == 'test: one-time Facebook Apify integration to AET Pro'",
+        "python run_offline_tests.py", "python public_guard.py",
+        "python -m ops.github.facebook_live_once",
+        "secrets.APIFY_TOKEN", "secrets.AET_PRO_SYNC_URL",
+        "secrets.AET_HUNTER_SYNC_TOKEN", "actions/cache/restore@v4",
+        "actions/cache/save@v4", "persist-credentials: false",
+        "aet-public-original-hunter"))
+        or "  schedule:" in facebook_once_workflow
+        or "  pull_request:" in facebook_once_workflow
+        or "  workflow_dispatch:" in facebook_once_workflow
+        or "AET_GITHUB_TERMS_APPROVED" in facebook_once_workflow
+        or "secrets.AET_GITHUB_TOKEN" in facebook_once_workflow):
+    raise SystemExit("One-shot Apify Facebook test must remain owner-only, single-triggered, encrypted, capped and never scheduled")
+
 one_time_workflow = Path(".github/workflows/marktplaats-one-time-integration.yml").read_text(encoding="utf-8")
 if ("  workflow_dispatch:" not in one_time_workflow
         or "  schedule:" in one_time_workflow
