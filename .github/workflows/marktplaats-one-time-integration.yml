@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   scanner-integration-test:
-    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: one-time public Marktplaats integration') }}
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: one-time public Marktplaats integration') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
