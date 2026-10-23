@@ -60,6 +60,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
     def test_correct_setup_calls_same_original_bridge(self):
         env = {
             "AET_PUBLIC_HUNTER_ENABLED": "true",
+            "AET_GITHUB_TERMS_APPROVED": "true",
             "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
             "GITHUB_REF": "refs/heads/main",
             "AET_GITHUB_TOKEN": "example-private-token-25-chars",
