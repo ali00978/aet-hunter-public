@@ -20,6 +20,8 @@ ALLOW = {
     "ops/github/public_actions_runner.py", "test_public_actions.py",
     "ops/github/connection_preflight.py", "test_connection_preflight.py",
     ".github/workflows/manual-connection-preflight.yml",
+    "ops/github/readonly_connection_check.py", "test_readonly_connection_check.py",
+    ".github/workflows/verify-github-apify-readonly.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
@@ -62,4 +64,14 @@ if ("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'" not in owner_workflow
         or "persist-credentials: false" not in owner_workflow
         or "  pull_request:" in owner_workflow):
     raise SystemExit("Public scheduled runner must stay owner-gated and secret-protected")
+read_only_workflow = Path(".github/workflows/verify-github-apify-readonly.yml").read_text(encoding="utf-8")
+if ("  workflow_dispatch:" not in read_only_workflow
+        or "  schedule:" in read_only_workflow
+        or "github.ref == 'refs/heads/main'" not in read_only_workflow
+        or "persist-credentials: false" not in read_only_workflow
+        or "ops/github/readonly_connection_check.py" not in read_only_workflow
+        or "secrets.AET_GITHUB_TOKEN" not in read_only_workflow
+        or "secrets.APIFY_TOKEN" not in read_only_workflow
+        or "secrets.AET_HUNTER_SYNC_TOKEN" in read_only_workflow):
+    raise SystemExit("Manual API probe must remain read-only and owner-gated")
 print("Public development tree passes allowlist, secrets and owner-gate checks")
