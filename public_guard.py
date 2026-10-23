@@ -15,7 +15,7 @@ ALLOW = {
     "ops/modal/legacy_bridge.py", "ops/modal/hunter_modal.py",
     "test_modal_bridge.py", ".github/workflows/deploy-modal.yml",
     "MODAL_HUNTER_SETUP.md",
-    "PUBLIC_GITHUB_HUNTER_SETUP.md",
+    "PUBLIC_GITHUB_HUNTER_SETUP.md", "AET_PRO_HANDOFF.md",
     ".github/workflows/public-original-hunter.yml",
     "ops/github/public_actions_runner.py", "test_public_actions.py",
     "ops/github/connection_preflight.py", "test_connection_preflight.py",
