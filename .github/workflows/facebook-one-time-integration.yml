@@ -9,6 +9,7 @@ permissions:
   contents: read
 
 # Apify POST query: maxItems (not maxPaidDatasetItems); price cap remains $0.06.
+# Corrected request option verified in Apify's API documentation and offline CI.
 # Validate included/prepaid Apify credits separately from billing limit.
 # POST remains capped at $0.06, only if included balance is sufficient.
 # Share the existing private cache-lock. Never launch in parallel with
