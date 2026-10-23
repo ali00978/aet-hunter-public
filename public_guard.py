@@ -30,6 +30,9 @@ ALLOW = {
     ".github/workflows/verify-private-snapshot-readonly.yml",
     "ops/github/live_marktplaats_smoke.py", "test_live_marktplaats_smoke.py",
     ".github/workflows/live-search-smoke.yml",
+    "ops/github/private_pr_offline_validation.py",
+    "test_private_pr_offline_validation.py",
+    ".github/workflows/verify-private-pr-offline.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
@@ -135,4 +138,17 @@ if ("  workflow_dispatch:" not in live_smoke_workflow
         or "python -m ops.github.live_marktplaats_smoke" not in live_smoke_workflow
         or "secrets." in live_smoke_workflow):
     raise SystemExit("One-request live search smoke must never hold secrets or be scheduled")
+private_pr_workflow = Path(".github/workflows/verify-private-pr-offline.yml").read_text(encoding="utf-8")
+if ("  workflow_dispatch:" not in private_pr_workflow
+        or "  schedule:" in private_pr_workflow
+        or "  push:" in private_pr_workflow
+        or "  pull_request:" in private_pr_workflow
+        or "github.repository == 'ali00978/aet-hunter-public'" not in private_pr_workflow
+        or "github.ref == 'refs/heads/main'" not in private_pr_workflow
+        or "persist-credentials: false" not in private_pr_workflow
+        or "secrets.AET_GITHUB_TOKEN" not in private_pr_workflow
+        or "ops/github/private_pr_offline_validation.py" not in private_pr_workflow
+        or "secrets.APIFY_TOKEN" in private_pr_workflow
+        or "secrets.AET_HUNTER_SYNC_TOKEN" in private_pr_workflow):
+    raise SystemExit("Private PR validation must be owner/main manual and never run paid providers")
 print("Public development tree passes allowlist, secrets and owner-gate checks")
