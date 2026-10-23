@@ -76,7 +76,9 @@ class NoRedirects(HTTPRedirectHandler):
 
 def send(payload, endpoint, token):
     url = urlsplit(endpoint)
-    if (url.scheme != "https" or url.hostname != "aet-cars-pro.eltakech100.workers.dev"\n            or url.path != "/api/integrations/hunter/sync" or url.port not in (None, 443)\n            or url.username or url.password or url.fragment or url.query):
+    if (url.scheme != "https" or url.hostname != "aet-cars-pro.eltakech100.workers.dev"
+            or url.path != "/api/integrations/hunter/sync" or url.port not in (None, 443)
+            or url.username or url.password or url.fragment or url.query):
         raise ValueError("Configure AET_PRO_SYNC_URL to the HTTPS Cloudflare sync endpoint")
     if not token or len(token) < 24:
         raise ValueError("AET_HUNTER_SYNC_TOKEN secret must be at least 24 characters")
@@ -87,7 +89,7 @@ def send(payload, endpoint, token):
         request = Request(endpoint, data=body, method="POST",
                           headers={"Content-Type": "application/json",
                                    "X-Hunter-Token": token,
-                                   "User-Agent": "AET-Hunter-GitHub-Actions/1"})
+                                   "User-Agent": "AET-Hunter-Modal/1"})
         try:
             with build_opener(NoRedirects()).open(request, timeout=20) as response:
                 if response.status != 200:
