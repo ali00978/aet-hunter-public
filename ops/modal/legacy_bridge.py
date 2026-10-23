@@ -42,10 +42,13 @@ esac
 """
 
 
-def verify_credentials(env: dict[str, str]) -> None:
-    missing = [name for name in NEEDED if not env.get(name, "").strip()]
+def verify_credentials(env: dict[str, str], platform: str = "both") -> None:
+    if platform not in ("marktplaats", "facebook", "both"):
+        raise ValueError("Unsupported Hunter platform")
+    needed = NEEDED if platform != "marktplaats" else NEEDED[:-1]
+    missing = [name for name in needed if not env.get(name, "").strip()]
     if missing:
-        raise RuntimeError("Missing required Modal Secret names: " + ", ".join(missing))
+        raise RuntimeError("Missing required Hunter Secret names: " + ", ".join(missing))
     try:
         target = urlsplit(env["AET_PRO_SYNC_URL"])
         port_ok = target.port in (None, 443)
@@ -108,8 +111,8 @@ def get_status(root: Path, filename: str) -> dict:
         return {}
 
 
-def prepare_clone(scratch: Path, env: dict[str, str]) -> Path:
-    verify_credentials(env)
+def prepare_clone(scratch: Path, env: dict[str, str], platform: str = "both") -> Path:
+    verify_credentials(env, platform)
     askpass = scratch / "askpass.sh"
     askpass.write_text(ASKPASS, encoding="utf-8")
     askpass.chmod(0o700)
@@ -169,6 +172,15 @@ def scan_marktplaats(root: Path, env: dict[str, str]) -> None:
 
 
 def scan_facebook(root: Path, env: dict[str, str]) -> None:
+    # The original provider has a strict 100-request monthly cap. Bail out
+    # before tests, API requests or sync when already exhausted; MP is separate.
+    from datetime import datetime, timezone
+    budget = get_status(root, "apify_budget.json")
+    if budget.get("month") == datetime.now(timezone.utc).strftime("%Y-%m"):
+        used = budget.get("calls", 0)
+        if isinstance(used, int) and not isinstance(used, bool) and used >= 100:
+            print("Facebook: SKIPPED (100 monthly provider requests already used)")
+            return
     execute([sys.executable, "-m", "unittest", "-q", "test_hunter.py"],
             root, env, timeout=120)
     execute([sys.executable, "apify_test.py"], root, env, timeout=170)
@@ -181,26 +193,32 @@ def scan_facebook(root: Path, env: dict[str, str]) -> None:
     print("Facebook: completed, stored privately, AET Pro sync attempted")
 
 
-def run_original_hunter(env: dict[str, str] | None = None) -> None:
-    """Each platform still runs once per two-hour cycle; no original code edits."""
+def run_original_hunter(env: dict[str, str] | None = None,
+                        platform: str = "both") -> None:
+    """Execute exactly the selected original private scanner.
+
+    Platform-isolated invocations allow different schedules and secrets.
+    The legacy authorized Modal executor keeps its 'both' default.
+    """
     env = dict(os.environ if env is None else env)
     if env.get("AET_MODAL_LIVE_ENABLED") != "I_ACCEPT_LIVE_SCANS":
         print("DISABLED: no live requests or private repository access")
         return
-    verify_credentials(env)
+    verify_credentials(env, platform)
     with tempfile.TemporaryDirectory(prefix="aet-hunter-private-") as tmp:
         scratch = Path(tmp)
-        work = prepare_clone(scratch, env)
+        work = prepare_clone(scratch, env, platform)
         # Created by prepare_clone; never embed credentials in Git URLs.
         running_env = {**env, "GIT_ASKPASS": str(scratch / "askpass.sh"),
                        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
         errors = []
-        for platform, func in (("marktplaats", scan_marktplaats),
-                               ("facebook", scan_facebook)):
+        scanners = {"marktplaats": scan_marktplaats, "facebook": scan_facebook}
+        choices = ("marktplaats", "facebook") if platform == "both" else (platform,)
+        for label in choices:
             try:
-                func(work, running_env)
+                scanners[label](work, running_env)
             except Exception as exc:
-                errors.append(platform + ": " + type(exc).__name__)
-                print(platform + ": ERROR (no secrets or listing data printed)")
+                errors.append(label + ": " + type(exc).__name__)
+                print(label + ": ERROR (no secrets or listing data printed)")
         if errors:
             raise RuntimeError("Hunter stage(s) failed: " + ", ".join(errors))
