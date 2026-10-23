@@ -1,0 +1,24 @@
+name: Verify AET Pro Hunter handshake (invalid payload only)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify Cloudflare sync token using intentionally invalid schema
+        env:
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+        run: python ops/github/aet_pro_handshake.py
