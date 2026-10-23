@@ -179,6 +179,91 @@ class BridgeTests(unittest.TestCase):
             execute.assert_not_called()
             publish.assert_not_called()
 
+    def test_modal_facebook_runs_twice_not_every_two_hours(self):
+        # The single Modal job avoids cross-platform snapshot push races.
+        source = (Path(__file__).parent / "ops/modal/hunter_modal.py").read_text(
+            encoding="utf-8")
+        self.assertIn('modal.Cron("17 */2 * * *", timezone="UTC")', source)
+        self.assertIn('now.hour in (2, 14)', source)
+        self.assertIn('else "marktplaats"', source)
+        self.assertIn('run_original_hunter(platform=platform)', source)
+
+    def test_non_github_runner_generates_unique_scan_id(self):
+        env = {
+            "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+            "AET_GITHUB_TOKEN": "fake-github",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "long-enough-dummy-sync-secret-1234",
+        }
+        observed = []
+        with patch.object(bridge, "prepare_clone", return_value=Path("/tmp/dummy-hunter")), \
+                patch.object(bridge, "scan_marktplaats",
+                             side_effect=lambda _root, e: observed.append(
+                                 (e["GITHUB_RUN_ID"], e["GITHUB_RUN_ATTEMPT"]))), \
+                patch.object(bridge.time, "time_ns", side_effect=(1700000000000000001,
+                                                                  1700000000000000002)):
+            bridge.run_original_hunter(env, platform="marktplaats")
+            bridge.run_original_hunter(env, platform="marktplaats")
+        self.assertEqual(observed, [("1700000000000000001", "1"),
+                                    ("1700000000000000002", "1")])
+
+    def test_github_run_id_kept_when_available(self):
+        env = {
+            "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+            "AET_GITHUB_TOKEN": "fake-github",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "long-enough-dummy-sync-secret-1234",
+            "GITHUB_RUN_ID": "9876543", "GITHUB_RUN_ATTEMPT": "2",
+        }
+        with patch.object(bridge, "prepare_clone", return_value=Path("/tmp/dummy")), \
+                patch.object(bridge, "scan_marktplaats") as scanner, \
+                patch.object(bridge.time, "time_ns") as clock:
+            bridge.run_original_hunter(env, platform="marktplaats")
+            clock.assert_not_called()
+            self.assertEqual(scanner.call_args.args[1]["GITHUB_RUN_ID"], "9876543")
+            self.assertEqual(scanner.call_args.args[1]["GITHUB_RUN_ATTEMPT"], "2")
+
+    def test_provider_crash_persists_reserved_quota_without_sync(self):
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            budget = path / "apify_budget.json"
+            budget.write_text('{"month":"' + month + '","calls":31}', encoding="utf-8")
+            run_commands = []
+            def simulate(args, *_args, **_kwargs):
+                run_commands.append(args)
+                if "apify_test.py" in args:
+                    budget.write_text('{"month":"' + month + '","calls":32}', encoding="utf-8")
+                    raise RuntimeError("simulated provider interruption")
+                return 0
+            with patch.object(bridge, "execute", side_effect=simulate), \
+                    patch.object(bridge, "publish_snapshots") as published:
+                with self.assertRaisesRegex(RuntimeError, "simulated provider"):
+                    bridge.scan_facebook(path, {})
+            published.assert_called_once_with(
+                path, {}, ("apify_budget.json",),
+                "Preserve Facebook provider call reservation after failure")
+            self.assertEqual(__import__("json").loads(budget.read_text())["calls"], 32)
+            self.assertFalse(any("hunter_sync.py" in x for x in run_commands))
+
+    def test_invalid_monthly_counter_never_calls_provider(self):
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        with patch.object(bridge, "get_status", return_value={"month": month, "calls": "broken"}), \
+                patch.object(bridge, "execute") as execute:
+            with self.assertRaisesRegex(RuntimeError, "invalid monthly call counter"):
+                bridge.scan_facebook(Path("/tmp/missing"), {})
+            execute.assert_not_called()
+
+    def test_corrupt_budget_file_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "apify_budget.json").write_text("not-json", encoding="utf-8")
+            with patch.object(bridge, "execute") as execute:
+                with self.assertRaisesRegex(RuntimeError, "invalid budget"):
+                    bridge.scan_facebook(Path(tmp), {})
+                execute.assert_not_called()
+
     def test_disabled_platform_does_not_clone(self):
         with patch.object(bridge, "prepare_clone") as clone:
             bridge.run_original_hunter({"AET_MODAL_LIVE_ENABLED": "false"}, platform="facebook")

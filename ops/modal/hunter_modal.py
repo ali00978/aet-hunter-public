@@ -19,7 +19,18 @@ image = (
     max_containers=1,
 )
 def run_every_two_hours():
+    """One serialized job: MP every 2h, Facebook only twice daily.
+
+    Both providers use the same private clone when Facebook is due, so
+    concurrent commits cannot silently overwrite the combined export.
+    The original provider's 100-call monthly limit remains enforced.
+    """
     import sys
+    from datetime import datetime, timezone
     sys.path.insert(0, "/root/aet-modal")
     from legacy_bridge import run_original_hunter
-    run_original_hunter()
+    now = datetime.now(timezone.utc)
+    # Schedule fires at 02:17 and 14:17 UTC. No Facebook request on the
+    # remaining ten Marktplaats runs per day (previously twelve per day).
+    platform = "both" if now.hour in (2, 14) else "marktplaats"
+    run_original_hunter(platform=platform)
