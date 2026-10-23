@@ -28,6 +28,8 @@ ALLOW = {
     ".github/workflows/verify-apify-actor-readiness.yml",
     "ops/github/private_snapshot_preflight.py", "test_private_snapshot_preflight.py",
     ".github/workflows/verify-private-snapshot-readonly.yml",
+    "ops/github/live_marktplaats_smoke.py", "test_live_marktplaats_smoke.py",
+    ".github/workflows/live-search-smoke.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
@@ -67,6 +69,11 @@ if ("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'" not in owner_workflow
         or "secrets.AET_GITHUB_TOKEN" not in owner_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" not in owner_workflow
         or "secrets.APIFY_TOKEN" not in owner_workflow
+        or "cron: '47 2,14 * * *'" not in owner_workflow
+        or "AET_HUNTER_PLATFORM: marktplaats" not in owner_workflow
+        or "AET_HUNTER_PLATFORM: facebook" not in owner_workflow
+        or "inputs.platform == 'facebook'" not in owner_workflow
+        or "inputs.platform == 'marktplaats'" not in owner_workflow
         or "persist-credentials: false" not in owner_workflow
         or "  pull_request:" in owner_workflow):
     raise SystemExit("Public scheduled runner must stay owner-gated and secret-protected")
@@ -118,4 +125,14 @@ if ("  workflow_dispatch:" not in state_workflow
         or "secrets.APIFY_TOKEN" in state_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" in state_workflow):
     raise SystemExit("Private snapshot check must be owner/main manual and read-only")
+live_smoke_workflow = Path(".github/workflows/live-search-smoke.yml").read_text(encoding="utf-8")
+if ("  workflow_dispatch:" not in live_smoke_workflow
+        or "  schedule:" in live_smoke_workflow
+        or "  pull_request:" in live_smoke_workflow
+        or "github.repository == 'ali00978/aet-hunter-public'" not in live_smoke_workflow
+        or "github.ref == 'refs/heads/main'" not in live_smoke_workflow
+        or "persist-credentials: false" not in live_smoke_workflow
+        or "ops/github/live_marktplaats_smoke.py" not in live_smoke_workflow
+        or "secrets." in live_smoke_workflow):
+    raise SystemExit("One-request live search smoke must never hold secrets or be scheduled")
 print("Public development tree passes allowlist, secrets and owner-gate checks")
