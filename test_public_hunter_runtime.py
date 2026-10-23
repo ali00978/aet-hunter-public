@@ -36,7 +36,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 runtime.run_platform(source, env=cfg)
 
     def test_provider_spending_fails_closed(self):
-        for env in ({}, {"AET_APIFY_MONTHLY_BUDGET_USD":"NaN"},
+        for env in ({"AET_APIFY_MONTHLY_BUDGET_USD":"0"}, {"AET_APIFY_MONTHLY_BUDGET_USD":"NaN"},
                     {"AET_APIFY_MONTHLY_BUDGET_USD":"2","AET_APIFY_MAX_CHARGE_USD":"NaN"}):
             with self.subTest(env=env), self.assertRaises(ValueError):
                 apify.bounded_budget(env)
