@@ -1,10 +1,6 @@
 name: Validate private Hunter fix offline (no provider calls)
 on:
   workflow_dispatch:
-  # Recheck corrected read-only summary parser; remove this trigger after run.
-  push:
-    branches: [main]
-    paths: ['.github/workflows/verify-private-pr-offline.yml']
 
 permissions:
   contents: read
