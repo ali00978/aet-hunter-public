@@ -214,6 +214,8 @@ class StandaloneRuntimeTests(unittest.TestCase):
                             persist=lambda: stages.append("persist"),
                             reload=lambda: stages.append("reload"))
                 self.assertEqual(outcome, "synced")
+                self.assertEqual((hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                                  hunter_sync.ROOT, facebook_hunter.ROOT),previous_roots)
                 self.assertEqual(len(payloads), 1)
                 for filename in ("hunter_feed.json", "hunter_pro_export.json",
                                  "hunter_pro_combined.json"):
@@ -278,6 +280,8 @@ class StandaloneRuntimeTests(unittest.TestCase):
                     with patch.object(hunter_sync, "send", side_effect=fake_sync):
                         result = runtime.run_platform("facebook", env=env)
                 self.assertEqual(result, "synced")
+                self.assertEqual((hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                                  hunter_sync.ROOT, facebook_hunter.ROOT),previous)
                 self.assertEqual(outputs[0]["schema"], "aet-pro.hunter.sync.v1")
                 self.assertEqual(outputs[0]["scan"]["platform"], "facebook")
                 self.assertEqual(outputs[0]["scan"]["candidate_ids"], ["facebook:123456789"])
@@ -612,7 +616,68 @@ class StandaloneRuntimeTests(unittest.TestCase):
              "run_id":expected,"actor_id":"validactor12345"},getter=getter)
         self.assertEqual(state,"recovered")
         self.assertEqual(len(rows),1)
-        self.assertEqual(len(requested),3)
+        self.assertEqual(len(requested),2)
+        self.assertNotIn(apify.ACTOR_INFO,requested)
+        self.assertFalse(any("/actor-runs?" in url for url in requested))
+
+    def test_status_http_429_after_paid_start_keeps_run_and_enforces_cooldown(self):
+        from urllib.error import HTTPError
+        now=datetime.now(timezone.utc)
+        env={"AET_FACEBOOK_ENABLED":"true",
+             "APIFY_TOKEN":"safe-token-value-1234567"}
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(apify,"start_actor_async",return_value={
+                    "id":"abcXYZ123456","actId":"validactor12345"}) as starter:
+                with patch.object(apify,"await_started_actor",
+                     side_effect=HTTPError("https://api.apify.com",429,
+                                           "rate limited",None,None)):
+                    first=apify.collect(d,env,lambda:None,now=now,
+                                         account_check=lambda *_:True)
+            self.assertEqual(first["status"],"provider_pending")
+            self.assertEqual(starter.call_count,1)
+            self.assertTrue((Path(d)/apify.PENDING_ACTOR_FILE).is_file())
+            self.assertTrue(apify.active_backoff(d,now))
+            budget=json.loads((Path(d)/"apify_budget.json").read_text())
+            self.assertEqual(budget["calls"],1)
+            with patch.object(apify,"start_actor_async") as no_post:
+                with patch.object(apify,"read_only_provider_get") as no_get:
+                    second=apify.collect(d,env,lambda:None,now=now,
+                                         account_check=lambda *_:
+                                         self.fail("No billable preflight"))
+            self.assertEqual(second["status"],"provider_cooldown")
+            self.assertTrue((Path(d)/apify.PENDING_ACTOR_FILE).is_file())
+            no_post.assert_not_called()
+            no_get.assert_not_called()
+
+    def test_network_poll_failure_after_paid_start_preserves_marker(self):
+        from urllib.error import URLError
+        now=datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            marker={"actor":apify.ACTOR,"started_at":now.isoformat()}
+            apify.atomic_json(Path(d)/apify.PENDING_ACTOR_FILE,marker)
+            def starter(token,cap,now):
+                return {"id":"abcXYZ123456","actId":"validactor12345"}
+            def fail_waiter(token,marker):
+                raise URLError("disconnected")
+            with self.assertRaises(apify.PendingActorError):
+                apify.launch_and_collect("safe-token-value-1234567",0.05,d,
+                                          lambda:None,now=now,
+                                          starter=starter,
+                                          wait_for_result=fail_waiter)
+            saved=json.loads((Path(d)/apify.PENDING_ACTOR_FILE).read_text())
+            self.assertEqual(saved["run_id"],"abcXYZ123456")
+            self.assertTrue(apify.active_backoff(d,now))
+
+    def test_known_run_identity_mismatch_never_accepts_dataset(self):
+        now=datetime.now(timezone.utc)
+        with self.assertRaises(ValueError):
+            apify.recover_uncertain_run(
+                "safe-token-value-1234567",
+                {"actor":apify.ACTOR, "started_at":now.isoformat(),
+                 "run_id":"abcXYZ123456","actor_id":"validactor12345"},
+                getter=lambda url,token: {"data":{"id":"abcXYZ123456",
+                           "actId":"differentactor98765","status":"SUCCEEDED",
+                           "defaultDatasetId":"abCd12345678"}})
 
     def test_provider_http_429_creates_real_cooldown_without_second_request(self):
         from urllib.error import HTTPError

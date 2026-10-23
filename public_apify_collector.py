@@ -442,7 +442,20 @@ def launch_and_collect(token, cap, root, persist, now=None,
     atomic_json(Path(root)/PENDING_ACTOR_FILE,marker)
     persist()
     waiter=wait_for_result or await_started_actor
-    result, rows=waiter(token,marker)
+    try:
+        result, rows=waiter(token,marker)
+    except HTTPError as error:
+        # The paid POST has ALREADY succeeded. A 401/429 on a subsequent
+        # free status GET is NOT evidence that the Actor failed to start.
+        # Keep its encrypted run ID and respect account cooldown.
+        set_backoff(root,now,http_code=error.code)
+        raise PendingActorError("Apify status GET interrupted") from None
+    except (URLError, TimeoutError, OSError, ValueError, TypeError,
+            KeyError, UnicodeError):
+        # Polling can fail while the Actor continues to run. Never drop
+        # the paid-start marker or send another billable POST.
+        set_backoff(root,now)
+        raise PendingActorError("Apify status could not be verified") from None
     if result=="recovered" and isinstance(rows,list):
         return rows
     if result=="failed":
@@ -517,20 +530,31 @@ def recover_uncertain_run(token, marker, getter=None):
         raise ValueError("Pending actor timestamp is in the future")
     started = started.astimezone(timezone.utc)
     fmt = lambda moment: moment.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    actor = getter(ACTOR_INFO, token)
-    details = actor.get("data") if isinstance(actor,dict) else None
-    actor_id = details.get("id") if isinstance(details,dict) else None
-    if not isinstance(actor_id,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",actor_id):
-        raise ValueError("Apify Actor identity could not be verified")
-    expected_id=marker.get("actor_id")
-    if expected_id is not None and expected_id!=actor_id:
-        raise ValueError("Persisted run has mismatched Apify Actor identity")
     known_run=marker.get("run_id")
     if known_run is not None:
-        if not isinstance(known_run,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",known_run):
+        # The asynchronous POST already returned both IDs. The GET below
+        # verifies the run's actId, so fetching actor metadata on EVERY poll
+        # adds requests without increasing confidence.
+        actor_id=marker.get("actor_id")
+        if (not isinstance(actor_id,str) or
+                not re.fullmatch(r"[A-Za-z0-9]{8,35}",actor_id)):
+            raise ValueError("Unverifiable persisted Apify Actor identity")
+        if (not isinstance(known_run,str) or
+                not re.fullmatch(r"[A-Za-z0-9]{8,35}",known_run)):
             raise ValueError("Invalid persisted Apify run ID")
         id_=known_run
     else:
+        # Legacy synchronous timeouts have no confirmed run ID: verify
+        # the actor metadata and find exactly one run in the time window.
+        actor = getter(ACTOR_INFO, token)
+        details = actor.get("data") if isinstance(actor,dict) else None
+        actor_id = details.get("id") if isinstance(details,dict) else None
+        if (not isinstance(actor_id,str) or
+                not re.fullmatch(r"[A-Za-z0-9]{8,35}",actor_id)):
+            raise ValueError("Apify Actor identity could not be verified")
+        expected_id=marker.get("actor_id")
+        if expected_id is not None and expected_id!=actor_id:
+            raise ValueError("Persisted run has mismatched Apify Actor identity")
         # Legacy timed-out synchronous request: identify exactly one run
         # within its bounded original time window, never guess by recency.
         query = urlencode({"limit":50,"desc":1,
@@ -623,13 +647,27 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
         persist()
         return status
     if pending is not None:
+        # Respect explicit 401/402/403/429 account restrictions even when
+        # recovering an already-paid Actor. Regular network backoff does
+        # not block read-only recovery of an uncertain result.
+        if active_backoff(root,now):
+            backoff=json.loads((root / COOLDOWN_FILE).read_text(encoding="utf-8"))
+            if isinstance(backoff,dict) and backoff.get("reason")=="http_restricted":
+                status["status"]="provider_cooldown"
+                atomic_json(root / "apify_status.json",status)
+                persist()
+                return status
         # This is GET-only and runs before quota/backoff checks. It cannot
         # launch or charge a second Actor while the prior POST is uncertain.
         try:
             recovery_state, recovered_rows = (
                 recovery_fn(token,pending) if recovery_fn
                 else recover_uncertain_run(token,pending))
-        except (ValueError, HTTPError, URLError, TimeoutError, OSError,
+        except HTTPError as error:
+            if error.code in (401,402,403,429):
+                set_backoff(root,now,http_code=error.code)
+            recovery_state, recovered_rows = "unresolved", None
+        except (ValueError, URLError, TimeoutError, OSError,
                 TypeError, KeyError, UnicodeError):
             recovery_state, recovered_rows = "unresolved", None
         if recovery_state == "failed":

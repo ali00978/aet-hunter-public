@@ -135,6 +135,10 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
     import hunter_pro_combined
     import hunter_sync
     import facebook_hunter
+    # Restore module paths even on a failed run. This avoids a later scan
+    # or offline test accidentally reading an earlier temporary directory.
+    previous_paths = (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                      hunter_sync.ROOT, facebook_hunter.ROOT)
     # Inject persistent storage without writing any records to the code tree.
     hunter_feed.ROOT = root
     hunter_pro_combined.OUTPUT = root / "hunter_pro_combined.json"
@@ -206,3 +210,5 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         return "synced"
     finally:
         os.chdir(cwd)
+        (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+         hunter_sync.ROOT, facebook_hunter.ROOT) = previous_paths

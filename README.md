@@ -4,6 +4,15 @@ De openbare `ali00978/aet-hunter-public` repository bevat de zelfstandige
 Marktplaats-scanner, Facebook/Apify-verwerking, marktwaardebeoordeling en het
 bestaande AET Pro-importcontract.
 
+**Laatste kwaliteitscontrole:** een reeds bevestigde Apify-run vereist
+alleen het uitlezen van het eigen run-ID, niet telkens extra Actor-metadata.
+Bij HTTP 429 of wegvallende netwerkverbinding tijdens het opvragen van
+de runstatus blijven de betaalreservering, het bekende run-ID en de
+versleutelde geschiedenis behouden. Een accountbeperking activeert
+een read-only cooldown; geen tweede betaalde POST. Na afloop
+herstellen modules hun oorspronkelijke private directorypaden om
+lekken tussen scans en offline tests te voorkomen.
+
 **Facebook herstel na een afgebroken providerverbinding:** de betaalde
 aanroep gebruikt nu het officieel ondersteunde asynchrone Apify-startpunt
 en slaat het door Apify bevestigde run-ID direct versleuteld op.
