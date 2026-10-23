@@ -259,18 +259,84 @@ def reserve(root, env, persist, now=None):
     return cap
 
 
-def fetch_actor(token, cap, opener=None):
+# Rotate 16 frequent resale models over two days, 2 runs per day.
+# Strict keyword and vehicle-only filters prevent paying for parts or scooters.
+# Four searches x four detailed cars is deliberately within $0.06/run at
+# the Actor's published search/listing/detail event pricing. Actual charges
+# remain guarded by Apify's maxTotalChargeUsd limit.
+SEARCH_GROUPS = (
+    ("corsa", "clio", "aygo", "polo"),
+    ("picanto", "206", "punto", "fiesta"),
+    ("alto", "i10", "c1", "fabia"),
+    ("astra", "twingo", "ibiza", "207"),
+)
+
+def query_group(now=None):
+    from datetime import date
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("Timezone-aware Actor scheduling required")
+    slot = now.astimezone(timezone.utc).date().toordinal()*2 + (
+        1 if now.astimezone(timezone.utc).hour >= 12 else 0)
+    return list(SEARCH_GROUPS[slot % len(SEARCH_GROUPS)])
+
+
+def provider_vehicle_fields(raw):
+    """Use details without storing arbitrary private provider/seller fields."""
+    from marktplaats_data import parse_mileage
+    if not isinstance(raw,dict):
+        return {}
+    info = raw.get("vehicle")
+    if not isinstance(info,dict):
+        return {}
+    cleaned = {}
+    make = info.get("make")
+    model = info.get("model")
+    if isinstance(make,str) and isinstance(model,str):
+        cleaned["vehicle_identity_hint"] = (make[:35],model[:45])
+    year = info.get("year")
+    if type(year) is int and 1950 <= year <= 2030:
+        cleaned["year"] = year
+    mileage = parse_mileage(info.get("mileage"))
+    unit = str(info.get("mileageUnit") or "").upper()
+    if mileage is not None:
+        if unit in ("MILES","MI"):
+            mileage = round(mileage * 1.609344)
+        elif unit not in ("KM","KILOMETERS","KILOMETRES",""):
+            mileage = None
+        if mileage is not None:
+            cleaned["mileage_km"] = mileage
+    seller = str(info.get("sellerType") or "").upper()
+    if seller == "PRIVATE_SELLER": cleaned["seller_type"] = "particulier"
+    elif seller in ("DEALER","DEALERSHIP","BUSINESS_SELLER"):
+        cleaned["seller_type"] = "handelaar"
+    return cleaned
+
+
+def fetch_actor(token, cap, opener=None, now=None):
     """One bounded POST. A timeout may have started a billable Actor."""
     if not isinstance(token, str) or len(token.strip()) < 15:
         raise ValueError("Missing Apify token")
     query = urlencode({"timeout": 90, "memory": 256,
                        "maxItems": MAX_ITEMS_PER_RUN,
                        "maxTotalChargeUsd": str(cap)})
-    payload = {"searchQueries": [], "location": "Dronten, Netherlands",
-               "categories": ["vehicles"], "maxItemsPerSearch": MAX_ITEMS_PER_RUN,
-               "vehiclesOnly": True, "includeDetails": False,
-               "excludeDownPaymentAds": True, "minPrice": 350,
-               "maxPrice": 3000, "sortNewestFirst": True}
+    payload = {
+        "searchQueries": query_group(now),
+        "location": "Dronten, Netherlands",
+        "strictKeywordMatch": True,
+        "vehiclesOnly": True,
+        "includeDetails": True,
+        "excludeDownPaymentAds": True,
+        "excludeKeywords": [
+            "stuurwiel", "velgen", "onderdelen", "sloopauto", "gezocht",
+            "auto onderdelen", "winterbanden", "bumper", "scooter"
+        ],
+        "daysSinceListed": "30",
+        "maxItemsPerSearch": 4,
+        "minPrice": 350,
+        "maxPrice": 3000,
+        "sortNewestFirst": True,
+    }
     request = Request(BASE + "?" + query, method="POST",
                       data=json.dumps(payload).encode("utf-8"),
                       headers={"Authorization": "Bearer " + token.strip(),
@@ -351,7 +417,7 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
         persist()
     status["status"] = "request_failed"
     try:
-        rows = request_fn(token, cap) if request_fn else fetch_actor(token, cap)
+        rows = request_fn(token, cap) if request_fn else fetch_actor(token, cap, now=now)
         if not rows:
             # Zero results can signal provider/API breakage; do not erase the
             # previous saved candidates or synchronize an empty Facebook feed.
@@ -374,7 +440,7 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
                        "imageUrls", "photoUrls", "photoUrl", "image", "imageUrl",
                        "image_url", "thumbnailUrl", "thumbnail", "photo",
                        "picture", "primaryImage", "coverPhoto", "mainImage",
-                       "listingImage")
+                       "listingImage", "currency", "priceFormatted")
             for raw in rows:
                 if not isinstance(raw, dict):
                     continue
@@ -385,6 +451,11 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
                     continue
                 first_seen = history.get(url)
                 normalized = {key: raw[key] for key in allowed if key in raw}
+                vehicle = provider_vehicle_fields(raw)
+                normalized.update({key:value for key,value in vehicle.items()
+                                   if key != "vehicle_identity_hint"})
+                # Never convert currencies silently. Make/source identity
+                # remains unverifiable unless Facebook provided it.
                 if isinstance(normalized.get("description"), str):
                     normalized["description"] = normalized["description"][:600]
                 normalized["first_seen_at"] = first_seen or now.isoformat()
@@ -393,6 +464,16 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
                     normalized["seller_type"] = "particulier"
                 elif provider_seller in ("DEALER", "DEALERSHIP", "BUSINESS_SELLER"):
                     normalized["seller_type"] = "handelaar"
+                if "vehicle_identity_hint" in vehicle:
+                    from facebook_vehicle_filter import term
+                    make,model = vehicle["vehicle_identity_hint"]
+                    # A genuine conflicting title/structured make requires
+                    # manual investigation, not automatic dealer import.
+                    if not (term(str(normalized.get("title") or "").casefold(),
+                                 make.casefold()) or
+                            term(str(normalized.get("title") or "").casefold(),
+                                 model.casefold())):
+                        continue
                 car = facebook_hunter.normalize(normalized, "Apify", now,
                                                  provider_at=now)
                 if car is None:

@@ -27,6 +27,24 @@ mogen onversleutelde advertenties, identificeerbare data of credentials er
 **nooit** in. Het automatisch hergebruiken van de cache is niet gegarandeerd;
 bij een ontbrekende cache stoppen geplande runs tot een bewuste herstelactie.
 
+**Facebook handelskwaliteit (versie oktober 2026):** De prijs alleen bewijst
+geen koopkans. De scanner rolt vier roulerende modelgerichte zoekgroepen
+uit (Corsa, Clio, Aygo, Polo en twaalf andere populaire modellen) en gebruikt
+een kleine, betaalplafond-begrensde hoeveelheid extra voertuigdetails.
+Hij verwerkt kilometerstanden in **mijlen correct naar kilometers** en
+geeft particuliere verkopers, goede bouwjaren, aanwezige foto's en lage km
+voorrang. Oudere auto's met een hoge vraagprijs en technische risico's
+krijgen een lagere score. Andere dan de zestien toegestane merken worden
+niet aan AET Pro aanbevolen. Ontbrekende jaar/km/verkoopinformatie blijven
+zichtbaar als onbevestigd; geen enkel Facebook-resultaat wordt als
+geverifieerde winst van EUR 500 gepresenteerd.
+
+**Kostenafweging:** het huidige maximum van $0,06 per Facebook-Actor-run
+blijft intact. Met vier zoekvragen van maximaal vier advertenties met
+extra details worden minder auto's per scan verwerkt dan de eerdere
+80 brede, ongedetailleerde resultaten. Dat is bewust om kwaliteit te
+verbeteren binnen de gratis credits.
+
 **Apify Free-optimalisatie:** maximaal 80 Facebook-listings per scan,
 maximaal 2 geplande starts per dag, en een harde limiet van $0,06
 per Actor-start en $4 per kalendermaand. De Actor start alleen met

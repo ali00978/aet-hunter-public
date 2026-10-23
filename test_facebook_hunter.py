@@ -70,6 +70,38 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         exported=fb.for_pro([item])[0]
         self.assertEqual(exported["photo_urls"],item["photo_urls"])
 
+    def test_low_quality_older_expensive_cars_rank_below_trade_worthy_cars(self):
+        old={**self.good, "title":"Volkswagen Polo 2002",
+             "price":2700, "mileage_km":310000, "seller_type":"onbekend",
+             "score":99}
+        good={**self.good, "url":"https://www.facebook.com/marketplace/item/22222222/",
+              "title":"Renault Clio 2013", "price":850, "mileage_km":125000,
+              "seller_type":"particulier", "score":1,
+              "photoUrl":"https://scontent.xx.fbcdn.net/v/car.jpg"}
+        old_result=fb.normalize(old,"Apify",self.now)
+        good_result=fb.normalize(good,"Apify",self.now)
+        self.assertLess(old_result["score"],good_result["score"])
+        self.assertGreater(good_result["score"],75)
+        self.assertLess(old_result["score"],35)
+        self.assertTrue(any("Ouder bouwjaar" in t for t in old_result["issues"]))
+
+    def test_trade_brands_only_and_foreign_currency_rejected(self):
+        self.assertIsNone(fb.normalize({**self.good,"title":"Honda Civic 2012"},"Apify",self.now))
+        self.assertIsNone(fb.normalize({**self.good,"title":"Nissan Micra 2012"},"Apify",self.now))
+        self.assertIsNone(fb.normalize({**self.good,"currency":"USD"},"Apify",self.now))
+        self.assertIsNone(fb.normalize({**self.good,"priceFormatted":"$1,200"},"Apify",self.now))
+        self.assertIsNotNone(fb.normalize({**self.good,"currency":"EUR"},"Apify",self.now))
+
+    def test_description_mechanical_warning_reduces_priority(self):
+        healthy=fb.normalize({**self.good,"seller_type":"particulier",
+                             "mileage_km":110000},"Apify",self.now)
+        damaged=fb.normalize({**self.good,"seller_type":"particulier",
+                             "mileage_km":110000,
+                             "description":"Auto rijdt, maar motorstoring blijft aan"},"Apify",self.now)
+        self.assertLess(damaged["score"],healthy["score"])
+        self.assertLessEqual(damaged["score"],24)
+        self.assertTrue(any("technisch risico" in x for x in damaged["issues"]))
+
     def test_synthetic_saved_facebook_sources(self):
         """Public CI must not rely on or publish private provider snapshots."""
         with tempfile.TemporaryDirectory() as path:

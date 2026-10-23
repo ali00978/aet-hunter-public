@@ -239,6 +239,53 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
 
 
+    def test_targeted_facebook_queries_rotate_and_fetch_vehicle_specs(self):
+        import urllib.parse
+        from datetime import datetime,timezone
+        self.assertEqual(len(apify.SEARCH_GROUPS), 4)
+        self.assertEqual(len({x for g in apify.SEARCH_GROUPS for x in g}), 16)
+        for slot in (0,1,2,3):
+            at=datetime(2026,10,23+slot//2,3 if slot%2==0 else 15,
+                        tzinfo=timezone.utc)
+            self.assertEqual(len(apify.query_group(at)),4)
+        caught={}
+        class Response:
+            status=200
+            def __enter__(self):return self
+            def __exit__(self,*a):return False
+            def read(self,n):return b"[]"
+        class Opener:
+            def open(self, req,timeout=0):
+                caught["payload"]=json.loads(req.data.decode())
+                caught["url"]=req.full_url
+                return Response()
+        apify.fetch_actor("safe-token-value-1234567",.06,opener=Opener())
+        payload=caught["payload"]
+        self.assertTrue(payload["vehiclesOnly"])
+        self.assertTrue(payload["strictKeywordMatch"])
+        self.assertTrue(payload["includeDetails"])
+        self.assertEqual(payload["daysSinceListed"],"30")
+        self.assertEqual(payload["maxItemsPerSearch"],4)
+        self.assertEqual(payload["maxPrice"],3000)
+        self.assertEqual(payload["minPrice"],350)
+        self.assertEqual(len(payload["searchQueries"]),4)
+        self.assertIn("maxTotalChargeUsd=0.06",caught["url"])
+
+    def test_nested_vehicle_details_km_conversion_and_seller(self):
+        self.assertEqual(
+            apify.provider_vehicle_fields({"vehicle":{
+                "mileage":120000, "mileageUnit":"MILES",
+                "year":2014, "sellerType":"PRIVATE_SELLER"}}),
+            {"year":2014, "mileage_km":193121,
+             "seller_type":"particulier"})
+        self.assertEqual(
+            apify.provider_vehicle_fields({"vehicle":{
+                "mileage":210000, "mileageUnit":"KM",
+                "sellerType":"DEALER"}}),
+            {"mileage_km":210000, "seller_type":"handelaar"})
+        self.assertNotIn("mileage_km", apify.provider_vehicle_fields(
+            {"vehicle":{"mileage":300000,"mileageUnit":"UNKNOWN"}}))
+
     def test_free_budget_clamps_old_high_configuration(self):
         monthly, run = apify.bounded_budget({
             "AET_APIFY_MONTHLY_BUDGET_USD": "25.00",
