@@ -1,0 +1,63 @@
+name: AET Facebook review saved ads and sync quality ranking
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/facebook-quality-replay.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aet-public-original-hunter
+  cancel-in-progress: false
+
+jobs:
+  quality-offline-tests:
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'test: one saved Facebook batch quality replay to AET Pro' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cryptography>=45,<50'
+      - name: Test offline Hunter and output safety
+        run: |
+          python public_guard.py
+          python run_offline_tests.py
+  replay-one-saved-batch:
+    needs: quality-offline-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cryptography>=45,<50'
+      - uses: actions/cache/restore@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            aet-hunter-state-v1-
+      - name: Re-rank saved Facebook adverts; sync one research batch
+        id: replay
+        env:
+          AET_FACEBOOK_QUALITY_REPLAY: ONE_SAVED_BATCH
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+        run: python -m ops.github.facebook_quality_replay
+      - name: Securely save quality replay marker even after failure
+        if: ${{ always() && steps.replay.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}

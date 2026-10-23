@@ -37,6 +37,8 @@ ALLOW = {
     "ops/github/standalone_hunter_runner.py", "test_github_standalone.py",
     "ops/github/facebook_live_once.py", "test_facebook_live_once.py",
     "ops/github/facebook_recover_existing.py", "test_facebook_recover_existing.py",
+    "ops/github/facebook_quality_replay.py", "test_facebook_quality_replay.py",
+    ".github/workflows/facebook-quality-replay.yml",
     ".github/workflows/facebook-recover-existing.yml",
     ".github/workflows/facebook-one-time-integration.yml",
     ".github/workflows/marktplaats-one-time-integration.yml",
@@ -178,6 +180,23 @@ if ("  workflow_dispatch:" not in private_pr_workflow
         or "secrets.APIFY_TOKEN" in private_pr_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" in private_pr_workflow):
     raise SystemExit("Private PR validation must be owner/main manual and never run paid providers")
+fb_quality_workflow = Path(".github/workflows/facebook-quality-replay.yml").read_text(encoding="utf-8")
+if (not all(word in fb_quality_workflow for word in (
+        "github.repository == 'ali00978/aet-hunter-public'",
+        "github.ref == 'refs/heads/main'",
+        "github.event.head_commit.message == 'test: one saved Facebook batch quality replay to AET Pro'",
+        "python public_guard.py", "python run_offline_tests.py",
+        "python -m ops.github.facebook_quality_replay",
+        "secrets.AET_PRO_SYNC_URL", "secrets.AET_HUNTER_SYNC_TOKEN",
+        "actions/cache/restore@v4", "actions/cache/save@v4",
+        "aet-public-original-hunter", "persist-credentials: false"))
+        or "  schedule:" in fb_quality_workflow
+        or "  workflow_dispatch:" in fb_quality_workflow
+        or "  pull_request:" in fb_quality_workflow
+        or "secrets.APIFY_TOKEN" in fb_quality_workflow
+        or "secrets.AET_GITHUB_TOKEN" in fb_quality_workflow):
+    raise SystemExit("Quality replay must be a single offline-to-AET Pro integration check")
+
 read_only_recover_workflow = Path(".github/workflows/facebook-recover-existing.yml").read_text(encoding="utf-8")
 if (not all(phrase in read_only_recover_workflow for phrase in (
         "github.repository == 'ali00978/aet-hunter-public'",

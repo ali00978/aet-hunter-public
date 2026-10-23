@@ -77,6 +77,14 @@ kan hij reeds betaalde datasetrecords via het normale filter naar AET Pro
 synchroniseren. Er wordt **geen** Apify Actor gestart en er is geen
 tweede commerciële scan. Kandidaten en een herstelmarker blijven versleuteld.
 
+**Kwaliteitscontrole bestaande Facebook-resultaten:** 
+`.github/workflows/facebook-quality-replay.yml` leest uitsluitend reeds
+opgeslagen advertenties uit de versleutelde historie, herordent ze op de
+nieuwe handelscore en kan eenmalig maximaal 30 auto's naar AET Pro
+synchroniseren. Dit start geen Apify-actor en voert geen Facebook-verzoeken
+uit. De code houdt de originele scantijd aan en weigert een AET Pro-import
+wanneer de opgeslagen gegevens ouder zijn dan vier uur.
+
 **Plan B:** Modal met privé-volume staat voorbereid in
 `ops/modal/public_hunter_modal.py`. Een externe host is niet verplicht voor
 de developmenttests. De oude privé-repository, privé-Actions en haar opgeslagen
