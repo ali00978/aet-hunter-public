@@ -73,7 +73,7 @@ for filename in tracked:
             raise SystemExit(f"Potential credential found in {filename}")
 owner_workflow = Path(".github/workflows/public-original-hunter.yml").read_text(encoding="utf-8")
 if ("vars.AET_PUBLIC_HUNTER_ENABLED != 'false'" not in owner_workflow
-        or "github.event.head_commit.message == 'activate: standalone public hunter first scan'" not in owner_workflow
+        or "github.event_name == 'push'" not in owner_workflow
         or "github.repository == 'ali00978/aet-hunter-public'" not in owner_workflow
         or "runs-on: ubuntu-latest" not in owner_workflow
         or "cron: '17 */2 * * *'" not in owner_workflow

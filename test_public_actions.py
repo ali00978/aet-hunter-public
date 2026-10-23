@@ -140,7 +140,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
         self.assertIn("group: aet-public-original-hunter", content)
         self.assertIn("vars.AET_PUBLIC_HUNTER_ENABLED != 'false'", content)
         self.assertNotIn("vars.AET_GITHUB_TERMS_APPROVED", content)
-        self.assertIn("github.event.head_commit.message == 'activate: standalone public hunter first scan'", content)
+        self.assertIn("github.event_name == 'push'", content)
         self.assertIn("actions/cache/restore@v4", content)
         self.assertIn("actions/cache/save@v4", content)
         self.assertIn("python -m ops.github.standalone_hunter_runner", content)

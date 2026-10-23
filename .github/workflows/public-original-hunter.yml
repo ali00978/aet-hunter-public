@@ -30,7 +30,7 @@ concurrency:
 jobs:
   marktplaats:
     if: >-
-      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED != 'false' && (github.event.schedule == '17 */2 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'marktplaats') || (github.event_name == 'push' && github.event.head_commit.message == 'activate: standalone public hunter first scan')) }}
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED != 'false' && (github.event_name == 'push' || inputs.platform == 'marktplaats' || github.event.schedule == '17 */2 * * *') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -52,7 +52,7 @@ jobs:
         id: scan
         env:
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
-          AET_STATE_BOOTSTRAP: ${{ ((github.event_name == 'workflow_dispatch' && inputs.bootstrap_state) || (github.event_name == 'push' && github.event.head_commit.message == 'activate: standalone public hunter first scan')) && 'true' || 'false' }}
+          AET_STATE_BOOTSTRAP: ${{ (github.event_name == 'push' || inputs.bootstrap_state) && 'true' || 'false' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
