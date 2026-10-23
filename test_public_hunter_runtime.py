@@ -443,6 +443,53 @@ class StandaloneRuntimeTests(unittest.TestCase):
             provider.assert_not_called()
             self.assertFalse((Path(d)/"apify_budget.json").exists())
 
+    def test_duplicate_matching_actor_runs_fail_closed(self):
+        from datetime import timedelta
+        from urllib.parse import urlsplit
+        started=datetime.now(timezone.utc)-timedelta(minutes=25)
+        marker={"actor":apify.ACTOR,"started_at":started.isoformat()}
+        def mock_get(url,token):
+            if url==apify.ACTOR_INFO:
+                return {"data":{"id":"testactorID123456"}}
+            if urlsplit(url).path=="/v2/actor-runs":
+                return {"data":{"items":[
+                    {"id":"runAlpha12345","actId":"testactorID123456",
+                     "startedAt":started.isoformat()},
+                    {"id":"runBeta123456","actId":"testactorID123456",
+                     "startedAt":started.isoformat()}]}}
+            self.fail("Ambiguous runs must NOT be queried for dataset")
+        state,rows=apify.recover_uncertain_run(
+            "safe-token-value-1234567",marker,getter=mock_get)
+        self.assertEqual((state,rows),("unresolved",None))
+
+    def test_corrupt_pending_marker_stops_before_any_paid_request(self):
+        env={"AET_FACEBOOK_ENABLED":"true",
+             "APIFY_TOKEN":"safe-token-value-1234567"}
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d)/apify.PENDING_ACTOR_FILE).write_text("not-json")
+            def forbidden(*_):
+                self.fail("Must not call Apify if pending state is corrupt")
+            result=apify.collect(d,env,lambda:None,
+                 request_fn=forbidden,account_check=forbidden,
+                 recovery_fn=forbidden)
+            self.assertEqual(result["status"],"provider_pending")
+            self.assertEqual(result["preflight_reason"],"pending_state_corrupt")
+            self.assertFalse((Path(d)/"apify_budget.json").exists())
+
+    def test_provider_http_429_clears_nonstarted_actor_marker(self):
+        from urllib.error import HTTPError
+        env={"AET_FACEBOOK_ENABLED":"true",
+             "APIFY_TOKEN":"safe-token-value-1234567"}
+        with tempfile.TemporaryDirectory() as d:
+            result=apify.collect(d,env,lambda:None,
+                request_fn=lambda *_: (_ for _ in ()).throw(
+                    HTTPError("https://api.apify.com",429,"rate limited",None,None)),
+                account_check=lambda *_:True)
+            self.assertEqual(result["status"],"http_error")
+            self.assertFalse((Path(d)/apify.PENDING_ACTOR_FILE).exists())
+            self.assertTrue((Path(d)/apify.COOLDOWN_FILE).exists())
+            self.assertEqual(json.loads((Path(d)/"apify_budget.json").read_text())["calls"],1)
+
     def test_provider_http_429_creates_real_cooldown_without_second_request(self):
         from urllib.error import HTTPError
         env = {"AET_FACEBOOK_ENABLED":"true",
