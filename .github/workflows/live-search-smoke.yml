@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: '3.12'
       - name: Request one public Marktplaats search page and check real parser
-        run: python ops/github/live_marktplaats_smoke.py
+        run: python -m ops.github.live_marktplaats_smoke
