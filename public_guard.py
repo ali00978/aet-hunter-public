@@ -34,6 +34,7 @@ ALLOW = {
     "hunter_sync.py", "public_apify_collector.py", "public_hunter_runtime.py",
     "test_public_hunter_runtime.py", "ops/modal/public_hunter_modal.py",
     "PUBLIC_STANDALONE_SETUP.md",
+    "ops/github/standalone_hunter_runner.py", "test_github_standalone.py",
     ".github/workflows/marktplaats-one-time-integration.yml",
     "ops/github/public_marktplaats_integration.py",
     "ops/github/private_pr_offline_validation.py",
@@ -75,17 +76,32 @@ if ("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'" not in owner_workflow
         or "vars.AET_GITHUB_TERMS_APPROVED == 'true'" not in owner_workflow
         or "github.repository == 'ali00978/aet-hunter-public'" not in owner_workflow
         or "runs-on: ubuntu-latest" not in owner_workflow
-        or "secrets.AET_GITHUB_TOKEN" not in owner_workflow
-        or "secrets.AET_HUNTER_SYNC_TOKEN" not in owner_workflow
-        or "secrets.APIFY_TOKEN" not in owner_workflow
+        or "cron: '17 */2 * * *'" not in owner_workflow
         or "cron: '47 2,14 * * *'" not in owner_workflow
+        or "secrets.AET_HUNTER_SYNC_TOKEN" not in owner_workflow
+        or "secrets.AET_PRO_SYNC_URL" not in owner_workflow
+        or "secrets.APIFY_TOKEN" not in owner_workflow
         or "AET_HUNTER_PLATFORM: marktplaats" not in owner_workflow
         or "AET_HUNTER_PLATFORM: facebook" not in owner_workflow
-        or "inputs.platform == 'facebook'" not in owner_workflow
         or "inputs.platform == 'marktplaats'" not in owner_workflow
+        or "inputs.platform == 'facebook'" not in owner_workflow
+        or "actions/cache/restore@v4" not in owner_workflow
+        or "actions/cache/save@v4" not in owner_workflow
+        or "python -m ops.github.standalone_hunter_runner" not in owner_workflow
         or "persist-credentials: false" not in owner_workflow
-        or "  pull_request:" in owner_workflow):
-    raise SystemExit("Public scheduled runner must stay owner-gated and secret-protected")
+        or "  pull_request:" in owner_workflow
+        or "secrets.AET_GITHUB_TOKEN" in owner_workflow
+        or "public_actions_runner" in owner_workflow
+        or "legacy_bridge" in owner_workflow
+        or "git clone" in owner_workflow
+        or "upload-artifact" in owner_workflow):
+    raise SystemExit("Public GitHub production workflow must be owner-approved, stand-alone, encrypted and private-data-safe")
+if ("secrets.AET_GITHUB_TOKEN" not in owner_workflow and "AET_STATE_BOOTSTRAP:" in owner_workflow
+        and "AET_GITHUB_TERMS_APPROVED" in owner_workflow):
+    pass
+else:
+    raise SystemExit("Public Hunter requires safe, manual, terms-approved state bootstrap")
+
 read_only_workflow = Path(".github/workflows/verify-github-apify-readonly.yml").read_text(encoding="utf-8")
 if ("  workflow_dispatch:" not in read_only_workflow
         or "  schedule:" in read_only_workflow

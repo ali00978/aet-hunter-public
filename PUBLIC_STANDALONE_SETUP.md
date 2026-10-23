@@ -1,3 +1,7 @@
+> **Plan B (Modal)**. De gebruiker kiest eerst GitHub openbaar als Plan A.
+> Raadpleeg [PUBLIC_GITHUB_HUNTER_SETUP.md](PUBLIC_GITHUB_HUNTER_SETUP.md).
+> Modal is pas nodig als GitHub-hosting niet toegestaan of onbetrouwbaar blijkt.
+
 # AET Hunter — zelfstandig op de openbare code, buiten betaalde privé-Actions
 
 **Status:** broncode, scanning, de Apify-collector, AET Pro v2-exports, Modal-planning

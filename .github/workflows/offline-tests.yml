@@ -31,5 +31,7 @@ jobs:
         run: python public_guard.py
       - name: Compile deployment wrappers without running live scanners
         run: python -m py_compile ops/modal/hunter_modal.py ops/modal/legacy_bridge.py ops/github/public_actions_runner.py ops/github/public_marktplaats_integration.py ops/modal/public_hunter_modal.py public_hunter_runtime.py public_apify_collector.py hunter_feed.py hunter_pro_export.py hunter_pro_combined.py
+      - name: Install encrypted state test dependency
+        run: python -m pip install 'cryptography>=45,<50'
       - name: Run offline code tests with sockets disabled
         run: python run_offline_tests.py

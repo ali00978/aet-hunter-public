@@ -1,31 +1,32 @@
-name: AET Hunter original scanners (separate platforms)
+name: AET Hunter PUBLIC standalone scanners (GitHub Plan A)
 on:
   workflow_dispatch:
     inputs:
       platform:
-        description: 'Choose ONE platform to test or operate'
+        description: 'Run ONE source'
         required: true
         type: choice
-        options:
-          - marktplaats
-          - facebook
+        options: [marktplaats, facebook]
+      bootstrap_state:
+        description: 'Only for FIRST Marktplaats run if encrypted state does not exist'
+        required: true
+        type: boolean
+        default: false
   schedule:
-    # Marktplaats up to every two hours (12 times daily).
     - cron: '17 */2 * * *'
-    # Facebook at most twice daily (<=62 monthly starts before provider cap).
     - cron: '47 2,14 * * *'
 
 permissions:
   contents: read
 
-# Prevent concurrent clones from racing to update private combined results.
 concurrency:
   group: aet-public-original-hunter
   cancel-in-progress: false
 
 jobs:
   marktplaats:
-    if: ${{ github.repository == 'ali00978/aet-hunter-public' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' && (github.event.schedule == '17 */2 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'marktplaats')) }}
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' && (github.event.schedule == '17 */2 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'marktplaats')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,18 +36,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run only original private Marktplaats scanner
+      - name: Install authenticated encryption library
+        run: python -m pip install 'cryptography>=45,<50'
+      - uses: actions/cache/restore@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            aet-hunter-state-v1-
+      - name: Scan PUBLIC Marktplaats and synchronize AET Pro privately
+        id: scan
         env:
-          AET_HUNTER_PLATFORM: marktplaats
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
           AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
-          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+          AET_STATE_BOOTSTRAP: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_state && 'true' || 'false' }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          AET_HUNTER_PLATFORM: marktplaats
           AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
           AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
-        run: python ops/github/public_actions_runner.py
-
+        run: python -m ops.github.standalone_hunter_runner
+      - name: Save encrypted Hunter history EVEN if scan fails
+        if: ${{ always() && steps.scan.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
   facebook:
-    if: ${{ github.repository == 'ali00978/aet-hunter-public' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' && (github.event.schedule == '47 2,14 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'facebook')) }}
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' && vars.AET_FACEBOOK_ENABLED == 'true' && (github.event.schedule == '47 2,14 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'facebook')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -56,13 +75,33 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run only original private Apify Facebook scanner
+      - name: Install authenticated encryption library
+        run: python -m pip install 'cryptography>=45,<50'
+      - uses: actions/cache/restore@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            aet-hunter-state-v1-
+      - name: Run capped Apify Facebook collector and synchronize AET Pro
+        id: scan
         env:
-          AET_HUNTER_PLATFORM: facebook
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
           AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
-          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+          AET_FACEBOOK_ENABLED: ${{ vars.AET_FACEBOOK_ENABLED }}
+          AET_APIFY_MONTHLY_BUDGET_USD: ${{ vars.AET_APIFY_MONTHLY_BUDGET_USD }}
+          AET_APIFY_MAX_CHARGE_USD: ${{ vars.AET_APIFY_MAX_CHARGE_USD }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          AET_HUNTER_PLATFORM: facebook
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
           AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
-          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-        run: python ops/github/public_actions_runner.py
+        run: python -m ops.github.standalone_hunter_runner
+      - name: Save encrypted Facebook budget and candidates EVEN on failure
+        if: ${{ always() && steps.scan.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}

@@ -125,7 +125,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
                     main()
                 run.assert_not_called()
 
-    def test_public_workflow_is_gated_and_has_no_direct_scraper_steps(self):
+    def test_public_workflow_is_gated_and_uses_encrypted_public_runner(self):
         path = Path(__file__).parent / ".github/workflows/public-original-hunter.yml"
         content = path.read_text(encoding="utf-8")
         self.assertIn("cron: '17 */2 * * *'", content)
@@ -140,12 +140,14 @@ class PublicGithubRunnerTests(unittest.TestCase):
         self.assertIn("group: aet-public-original-hunter", content)
         self.assertIn("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'", content)
         self.assertIn("vars.AET_GITHUB_TERMS_APPROVED == 'true'", content)
-        self.assertIn("AET_GITHUB_TOKEN: ", content)
-        self.assertIn("runs-on: ubuntu-latest", content)
+        self.assertIn("actions/cache/restore@v4", content)
+        self.assertIn("actions/cache/save@v4", content)
+        self.assertIn("python -m ops.github.standalone_hunter_runner", content)
+        self.assertNotIn("AET_GITHUB_TOKEN: ", content)
+        self.assertNotIn("ops/github/public_actions_runner.py", content)
         self.assertNotIn("  pull_request:", content)
         self.assertNotIn("git push", content)
         self.assertNotIn("python scanner.py", content)
-
 
 if __name__ == "__main__":
     unittest.main()
