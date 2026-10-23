@@ -6,8 +6,8 @@ De originele privé-repository en haar Actions blijven ongemoeid.
 ## Hoe gaat een run?
 
 - Marktplaats cron: `17 */2 * * *` (UTC), eens per twee uur.
-- Facebook/Apify cron: `47 2,14 * * *` (UTC), maximaal 2 geplande starts
-  per dag en alleen met expliciete budgetvariabelen.
+- Facebook/Apify cron: `47 2,10,18 * * *` (UTC), maximaal 3 geplande
+  starts per dag, onder een vast $0,05/$4,65 veiligheidsprofiel.
 - Beide jobs draaien rechtstreeks de code van `ali00978/aet-hunter-public`;
   ze gebruiken **nooit** een GitHub-token voor de privé-repository.
 - De scanner gebruikt dezelfde filters en marktvergelijking als de geteste
@@ -86,10 +86,11 @@ of de toestemming-schakerlaar annuleren een reeds lopende job niet.
    Inspecteer oorzaak en herstel geschiedenis voor een bewuste bootstrap.
 5. Facebook vereist daarnaast `APIFY_TOKEN` als Secret en
    `AET_FACEBOOK_ENABLED=true` als Actions Variable. De defaults zijn
-   `AET_APIFY_MONTHLY_BUDGET_USD=4.00` en
-   `AET_APIFY_MAX_CHARGE_USD=0.06`, beide in USD.
-   Zelfs wanneer een oudere Actions-variable een hoger bedrag bevat,
-   begrenst de code het op $4 per maand en $0,06 per Actor-start.
+   `AET_APIFY_MONTHLY_BUDGET_USD=4.65` en
+   `AET_APIFY_MAX_CHARGE_USD=0.05`, beide in USD. Deze waarden staan
+   direct in de geplande workflow. Oude optionele GitHub-variabelen
+   worden genegeerd om niet per ongeluk het vorige $4-profiel te gebruiken.
+   De Python-code begrenst de bedragen onafhankelijk ook zelf.
    De eerste Facebook-run vereist reeds bestaande state uit Marktplaats;
    ontbrekende quota-geschiedenis mag niet worden genegeerd.
 
@@ -106,17 +107,18 @@ De openbare Hunter past daarom strengere grenzen toe:
 - Maximaal **80 opgevraagde advertenties per Facebook-scan**, gevolgd
   door filters voor volledige auto's, vraagprijs €350–€3.000, km ≤330.000,
   particuliere verkoper en de leeftijd van advertenties.
-- Maximaal **2 geplande Facebook-scans per dag**, met **70 starts per
-  kalendermaand** als harde extra veiligheidsgrens.
-- Maximaal **$0,06 per Actor-start** en **$4 aan gereserveerde
-  worst-case-uitgaven per kalendermaand**. Bij 62 geplande starts
-  in een maand van 31 dagen wordt maximaal $3,72 gereserveerd.
-  Dit laat minstens $1 van de algemene $5-grens ongeclaimd door
-  onze lokale reserveringen.
-- **Vóór elke potentieel betaalde Actor-aanroep** wordt het werkelijke
-  resterende Apify-tegoed via een gratis, geauthenticeerde **GET**
-  gecontroleerd. Als het niet zeker is dat het een Free-account
-  betreft, het tegoed te laag is of de API faalt: **geen POST, geen kosten**.
+- Maximaal **3 geplande Facebook-scans per dag**, **93 starts per
+  kalendermaand**, met een harde grens van **$0,05 per start**.
+- Maximaal **$4,65 in de opgeslagen maandreserveringen**. Een volledig
+  ongebruikt Free-tegoed van $5 houdt theoretisch $0,35 over.
+  Eerdere $0,06-reserveringen en ander Apify-gebruik verminderen de
+  daadwerkelijk beschikbare ruimte; soms worden dus minder starts gedaan.
+- **Vóór elke potentieel betaalde Actor-aanroep** controleert de
+  scanner gratis via GET de echte inbegrepen credits en de bestedingen.
+  De controle weigert nieuwe starts boven $4,65 werkelijke
+  maandbesteding en bewaart minstens $0,30 speelruimte onder zowel
+  de inbegrepen credits als de Apify-accountlimiet. Onbekend saldo
+  of een API-fout betekent geen nieuw betaalverzoek.
 - HTTP 401/402/403/429 zorgt voor 24 uur provider-cooldown.
   Bij tijdelijke fouten stopt de provider minimaal 2 uur.
 - Lege en uitsluitend onderdelenbevattende resultaten verwijderen
@@ -125,10 +127,11 @@ De openbare Hunter past daarom strengere grenzen toe:
   versleuteld opgeslagen. Bij verloren/verlopen GitHub-cache
   wordt het budget **nooit automatisch naar nul teruggezet**.
 
-Het theoretische headline-tarief voor maximaal 80 × 62 = 4.960
-listings is $1,49. Dat is **geen nauwkeurige maandprognose** omdat
-echte Actor-kosten kunnen afwijken. Het productiebudget wordt bewaakt
-via de hardere cap van maximaal $0,06 per run en de Apify-accountgrens.
+Vier zoekvragen en zestien uitgebreide advertenties kosten volgens
+de gepubliceerde tarieven bij volledige oplevering circa $0,049 per
+run ($0,003 × 4 + $0,002 × 16 + $0,0003 × 16 + $0,00005).
+Extra betaalbare events kunnen een run eerder stoppen op $0,05.
+De limiet per run en het maandplafond blijven beide strikt van kracht.
 De Hunter start geen Facebook-Actor zonder
 `AET_FACEBOOK_ENABLED=true` en de overige productiegates.
 

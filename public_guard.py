@@ -84,7 +84,9 @@ if ("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'" not in owner_workflow
         or "github.repository == 'ali00978/aet-hunter-public'" not in owner_workflow
         or "runs-on: ubuntu-latest" not in owner_workflow
         or "cron: '17 */2 * * *'" not in owner_workflow
-        or "cron: '47 2,14 * * *'" not in owner_workflow
+        or "cron: '47 2,10,18 * * *'" not in owner_workflow
+        or "AET_APIFY_MONTHLY_BUDGET_USD: '4.65'" not in owner_workflow
+        or "AET_APIFY_MAX_CHARGE_USD: '0.05'" not in owner_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" not in owner_workflow
         or "secrets.AET_PRO_SYNC_URL" not in owner_workflow
         or "secrets.APIFY_TOKEN" not in owner_workflow

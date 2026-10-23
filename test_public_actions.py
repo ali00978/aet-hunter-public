@@ -129,7 +129,11 @@ class PublicGithubRunnerTests(unittest.TestCase):
         path = Path(__file__).parent / ".github/workflows/public-original-hunter.yml"
         content = path.read_text(encoding="utf-8")
         self.assertIn("cron: '17 */2 * * *'", content)
-        self.assertIn("cron: '47 2,14 * * *'", content)
+        self.assertIn("cron: '47 2,10,18 * * *'", content)
+        self.assertIn("AET_APIFY_MONTHLY_BUDGET_USD: '4.65'", content)
+        self.assertIn("AET_APIFY_MAX_CHARGE_USD: '0.05'", content)
+        self.assertNotIn("vars.AET_APIFY_MONTHLY_BUDGET_USD", content)
+        self.assertNotIn("vars.AET_APIFY_MAX_CHARGE_USD", content)
         self.assertIn("inputs.platform == 'facebook'", content)
         self.assertIn("inputs.platform == 'marktplaats'", content)
         mp, fb = content.split("  facebook:", 1)

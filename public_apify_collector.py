@@ -19,13 +19,14 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 ACTOR = "hydedata~facebook-marketplace-scraper"
 BASE = "https://api.apify.com/v2/acts/" + ACTOR + "/run-sync-get-dataset-items"
-# 2 scheduled runs/day = 62 starts in a 31-day month, with room for
-# eight authorized manual checks. These are safety limits, not entitlements.
-MAX_MONTHLY_STARTS = 70
+# Owner-approved profile: 3 starts/day * 31 days * $0.05 = $4.65.
+# Previous $0.06 reservations are retained, not reset.
+MAX_MONTHLY_STARTS = 93
 MAX_ITEMS_PER_RUN = 80
 FREE_MONTHLY_CREDIT_USD = 5.00
-LOCAL_MONTHLY_RESERVE_USD = 4.00
-DEFAULT_MAX_RUN_USD = 0.06
+LOCAL_MONTHLY_RESERVE_USD = 4.65
+DEFAULT_MAX_RUN_USD = 0.05
+ACCOUNT_HEADROOM_CUSHION_USD = 0.30
 COOLDOWN_FILE = "apify_backoff.json"
 ONE_TIME_RETRY_FILE = "apify_retry_once.json"
 ACCOUNT_LIMITS = "https://api.apify.com/v2/users/me/limits"
@@ -86,8 +87,8 @@ def verify_free_headroom(token, cap, opener=None):
 
     Apify account monthly limits can be higher than included plan credits.
     A $100 billing ceiling is NOT $100 of free credits. Read plan credits
-    separately and require a $0.50 cushion below BOTH account limit and
-    included usage. Never perform a paid POST if either GET fails.
+    separately and require $0.30 below BOTH account limit and included
+    credits, plus an absolute $4.65 cap against verified account usage. Never perform a paid POST if either GET fails.
     """
     if not isinstance(token, str) or len(token.strip()) < 15:
         raise ValueError("Missing Apify token")
@@ -139,9 +140,9 @@ def verify_free_headroom(token, cap, opener=None):
     # prepaid credits so the test never causes additional pay-as-you-go fees.
     if base_price == 0 and included > FREE_MONTHLY_CREDIT_USD + .01:
         raise ValueError("apify_included_credit_unknown")
-    if base_price == 0 and spent >= LOCAL_MONTHLY_RESERVE_USD:
+    if spent + cap > LOCAL_MONTHLY_RESERVE_USD + 1e-8:
         raise ValueError("apify_free_monthly_reserve_exhausted")
-    if spent + cap + 0.50 > min(maximum, included) + 1e-8:
+    if spent + cap + ACCOUNT_HEADROOM_CUSHION_USD > min(maximum, included) + 1e-8:
         raise ValueError("apify_remaining_included_credit_low")
     return True
 
@@ -259,9 +260,9 @@ def reserve(root, env, persist, now=None):
     return cap
 
 
-# Rotate 16 frequent resale models over two days, 2 runs per day.
+# Rotate 16 frequent resale models across three daily UTC time windows.
 # Strict keyword and vehicle-only filters prevent paying for parts or scooters.
-# Four searches x four detailed cars is deliberately within $0.06/run at
+# Four searches x four detailed cars is deliberately within ~$0.05/run at
 # the Actor's published search/listing/detail event pricing. Actual charges
 # remain guarded by Apify's maxTotalChargeUsd limit.
 SEARCH_GROUPS = (
@@ -272,12 +273,12 @@ SEARCH_GROUPS = (
 )
 
 def query_group(now=None):
-    from datetime import date
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("Timezone-aware Actor scheduling required")
-    slot = now.astimezone(timezone.utc).date().toordinal()*2 + (
-        1 if now.astimezone(timezone.utc).hour >= 12 else 0)
+    utc = now.astimezone(timezone.utc)
+    # Scheduled UTC hours: 02, 10 and 18. Rotate model groups every slot.
+    slot = utc.date().toordinal()*3 + utc.hour//8
     return list(SEARCH_GROUPS[slot % len(SEARCH_GROUPS)])
 
 

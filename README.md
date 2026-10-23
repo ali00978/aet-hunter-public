@@ -48,15 +48,23 @@ niet aan AET Pro aanbevolen. Ontbrekende jaar/km/verkoopinformatie blijven
 zichtbaar als onbevestigd; geen enkel Facebook-resultaat wordt als
 geverifieerde winst van EUR 500 gepresenteerd.
 
-**Kostenafweging:** het huidige maximum van $0,06 per Facebook-Actor-run
-blijft intact. Met vier zoekvragen van maximaal vier advertenties met
+**Kostenafweging:** het nieuwe maximum van $0,05 per geplande
+Facebook-Actor-run is expliciet begrensd en de oude $0,06-tests
+blijven in de historische maandreservering meetellen. Met vier zoekvragen van maximaal vier advertenties met
 extra details worden minder auto's per scan verwerkt dan de eerdere
 80 brede, ongedetailleerde resultaten. Dat is bewust om kwaliteit te
 verbeteren binnen de gratis credits.
 
 **Apify Free-optimalisatie:** maximaal 80 Facebook-listings per scan,
-maximaal 2 geplande starts per dag, en een harde limiet van $0,06
-per Actor-start en $4 per kalendermaand. De Actor start alleen met
+**3 geplande starts per dag** (02:47, 10:47, 18:47 UTC), maximaal
+**93 starts per kalendermaand**, en een harde limiet van **$0,05 per
+Actor-start en $4,65 per kalendermaand**. Er blijft theoretisch
+$0,35 over van $5 gratis tegoed wanneer geen andere Apify-kosten worden
+gemaakt. De bestaande versleutelde budgethistorie wordt behouden.
+De actuele inbegrepen credits worden vóór iedere betaalde aanvraag
+geverifieerd; de controle bewaakt daarnaast $0,30 vrije ruimte.
+Dit is een kostenplafond, geen garantie dat alle scans of voertuigdetails
+beschikbaar zijn. De Actor start alleen met
 voldoende geverifieerd Free-tegoed, op expliciete activering;
 HTTP-429-cooldowns en geldige oude resultaten blijven beschermd.
 De gepubliceerde Actor-prijs is een vanafprijs, geen

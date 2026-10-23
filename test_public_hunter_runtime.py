@@ -109,6 +109,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertEqual(budget["calls"], 1)
             apify.reserve(d, env, persist, now=now)
             apify.reserve(d, env, persist, now=now)
+            apify.reserve(d, env, persist, now=now)
             with self.assertRaises(ValueError):
                 apify.reserve(d, env, persist, now=now)
 
@@ -279,10 +280,12 @@ class StandaloneRuntimeTests(unittest.TestCase):
         from datetime import datetime,timezone
         self.assertEqual(len(apify.SEARCH_GROUPS), 4)
         self.assertEqual(len({x for g in apify.SEARCH_GROUPS for x in g}), 16)
-        for slot in (0,1,2,3):
-            at=datetime(2026,10,23+slot//2,3 if slot%2==0 else 15,
-                        tzinfo=timezone.utc)
+        scheduled = [datetime(2026,10,23+slot//3,(2,10,18)[slot%3],
+                              tzinfo=timezone.utc) for slot in range(12)]
+        for at in scheduled:
             self.assertEqual(len(apify.query_group(at)),4)
+        self.assertEqual(len(set(tuple(apify.query_group(at))
+                                 for at in scheduled[:4])),4)
         caught={}
         class Response:
             status=200
@@ -294,7 +297,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 caught["payload"]=json.loads(req.data.decode())
                 caught["url"]=req.full_url
                 return Response()
-        apify.fetch_actor("safe-token-value-1234567",.06,opener=Opener())
+        apify.fetch_actor("safe-token-value-1234567",.05,opener=Opener())
         payload=caught["payload"]
         self.assertTrue(payload["vehiclesOnly"])
         self.assertTrue(payload["strictKeywordMatch"])
@@ -304,7 +307,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["maxPrice"],3000)
         self.assertEqual(payload["minPrice"],350)
         self.assertEqual(len(payload["searchQueries"]),4)
-        self.assertIn("maxTotalChargeUsd=0.06",caught["url"])
+        self.assertIn("maxTotalChargeUsd=0.05",caught["url"])
 
     def test_nested_vehicle_details_km_conversion_and_seller(self):
         self.assertEqual(
@@ -325,12 +328,38 @@ class StandaloneRuntimeTests(unittest.TestCase):
         monthly, run = apify.bounded_budget({
             "AET_APIFY_MONTHLY_BUDGET_USD": "25.00",
             "AET_APIFY_MAX_CHARGE_USD": "0.40"})
-        self.assertEqual((monthly, run), (4.00, 0.06))
-        self.assertLessEqual(62 * run, monthly)
-        self.assertEqual(apify.bounded_budget({}), (4.00, 0.06))
+        self.assertEqual((monthly, run), (4.65, 0.05))
+        self.assertEqual(round(93 * run, 2), monthly)
+        self.assertEqual(apify.bounded_budget({}), (4.65, 0.05))
+        self.assertEqual(apify.bounded_budget({
+            "AET_APIFY_MONTHLY_BUDGET_USD": "4.00",
+            "AET_APIFY_MAX_CHARGE_USD": "0.04"}), (4.00,0.04))
         self.assertEqual(apify.MAX_ITEMS_PER_RUN, 80)
         self.assertEqual(apify.ONE_TIME_RETRY_FILE, "apify_retry_once.json")
-        self.assertEqual(apify.MAX_MONTHLY_STARTS, 70)
+        self.assertEqual(apify.MAX_MONTHLY_STARTS, 93)
+        self.assertAlmostEqual(apify.FREE_MONTHLY_CREDIT_USD-monthly,0.35)
+
+    def test_full_31_day_budget_cannot_exceed_4_65(self):
+        now=datetime(2026,10,1,tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            count=[]
+            for attempt in range(93):
+                self.assertEqual(apify.reserve(folder,{},lambda:count.append(1),now),0.05)
+            record=json.loads((Path(folder)/"apify_budget.json").read_text())
+            self.assertEqual(record,{"month":"2026-10","calls":93,"reserved_usd":4.65})
+            self.assertEqual(len(count),93)
+            with self.assertRaises(ValueError):
+                apify.reserve(folder,{},lambda:None,now)
+
+    def test_existing_six_cent_history_carries_forward(self):
+        now=datetime(2026,10,23,tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            p=Path(folder)/"apify_budget.json"
+            p.write_text(json.dumps({"month":"2026-10",
+                                     "calls":2,"reserved_usd":0.12}))
+            apify.reserve(folder,{},lambda:None,now)
+            data=json.loads(p.read_text())
+            self.assertEqual((data["calls"],data["reserved_usd"]),(3,0.17))
 
     def test_free_account_credit_gate_is_read_only_and_fail_closed(self):
         def fake_open(maximum=5, spent=2, included=5, price=0):
@@ -356,7 +385,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
             return Opener(), requests
         opener, records = fake_open()
         self.assertTrue(apify.verify_free_headroom(
-            "safe-token-value-1234567", 0.06, opener))
+            "safe-token-value-1234567", 0.05, opener))
         self.assertEqual([r[:2] for r in records],
                          [("GET", apify.ACCOUNT_LIMITS),
                           ("GET", apify.ACCOUNT_PLAN)])
@@ -366,12 +395,16 @@ class StandaloneRuntimeTests(unittest.TestCase):
         # credits are verified. A low included balance must stop the call.
         opener, _ = fake_open(maximum=100, spent=1, included=5, price=0)
         self.assertTrue(apify.verify_free_headroom(
-            "safe-token-value-1234567", 0.06, opener))
-        opener, _ = fake_open(maximum=100, spent=11, included=19, price=19)
+            "safe-token-value-1234567", 0.05, opener))
+        # Paid plans are also held to the owner's $4.65 monthly ceiling.
+        opener, _ = fake_open(maximum=100, spent=2, included=19, price=19)
         self.assertTrue(apify.verify_free_headroom(
-            "safe-token-value-1234567", 0.06, opener))
+            "safe-token-value-1234567", 0.05, opener))
+        opener, _ = fake_open(maximum=5, spent=4.60, included=5, price=0)
+        self.assertTrue(apify.verify_free_headroom(
+            "safe-token-value-1234567",0.05,opener))
         for maximum, spent, included, price in (
-                (5, 4.51, 5, 0), (5, 5.0, 5, 0),
+                (5, 4.61, 5, 0), (5, 5.0, 5, 0),
                 (100, 10, 5, 0), (5, -1, 5, 0),
                 (100, 4.9, 5, 19), (100, 1, 0, 0),
                 (100, 1, None, 0), (100, 1, 19, None)):
@@ -380,7 +413,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 opener, _ = fake_open(maximum, spent, included, price)
                 with self.assertRaises(ValueError):
                     apify.verify_free_headroom(
-                        "safe-token-value-1234567", 0.06, opener)
+                        "safe-token-value-1234567", 0.05, opener)
 
     def test_unverifiable_credits_never_start_paid_actor(self):
         env = {"AET_FACEBOOK_ENABLED":"true",
@@ -455,7 +488,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
             def provider(token, cap):
                 budget=json.loads((Path(d)/"apify_budget.json").read_text())
                 self.assertEqual(budget["calls"], 1)
-                self.assertEqual(budget["reserved_usd"], 0.06)
+                self.assertEqual(budget["reserved_usd"], 0.05)
                 self.assertEqual(order[0], "persistent")
                 return []
             status=apify.collect(d, env, persist, request_fn=provider,
