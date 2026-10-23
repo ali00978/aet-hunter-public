@@ -65,3 +65,36 @@ be re-enabled for rollback.
   respect cooldowns and websites' permitted access.
 - No actual production run has occurred: until Secrets + Variable are set, this
   is a tested deployment preparation, not a restored scanner.
+
+## Risico op GitHub-uitschakeling zo laag mogelijk houden
+
+De automatisch ingeroosterde commerciële scans staan **uit** totdat de eigenaar
+ze bewust activeert; daarmee starten we geen mogelijk strijdig gebruik zonder
+een voorafgaande beslissing. Een korte looptijd, weinig verzoeken en het
+afschermen van gegevens zijn verstandig, maar zijn **geen omweg** langs
+GitHubs voorwaarden: ook licht commercieel productiegebruik kan buiten het
+toegestane gebruik van GitHub-hosted Actions vallen.
+
+Controleer zo nodig vooraf bij GitHub Support of de beoogde terugkerende
+scanwerkzaamheden zijn toegestaan: https://support.github.com/ .
+Bied daarbij de werkelijke werking en frequentie aan; niet verbergen wat de
+workflow doet. GitHub kan de definitieve interpretatie bepalen.
+
+Extra technische beveiligingen:
+- Ontwikkeltests lopen alleen op de hoofdbranch en vertrouwde pull requests:
+  geen onnodige dubbele tests na iedere feature-push of fork.
+- De optionele productiejob heeft een maximum van 30 minuten en één
+  concurrency-groep; de twee-uursplanning blijft inhoudelijk gelijk.
+- De uitvoer gebruikt alleen vooraf ingestelde, versleutelde secrets; nooit
+  een token in broncode, commit of publieke Actions-log.
+- De originele privé-repository en AET Pro blijven onaangeroerd tot de
+  daadwerkelijke synchronisatie veilig is geverifieerd.
+- Een ongeldige HTTPS-synchronisatie-URL, niet-goedgekeurde branch, verkeerde
+  eigenaar, of ontbrekende sleutel stopt de job vóór uitvoering.
+- Zet de variabele AET_PUBLIC_HUNTER_ENABLED op false om onmiddellijk verdere
+  uitvoeringen te blokkeren. Reeds gestarte runs kunnen apart gestopt worden.
+
+Als **zo klein mogelijk risico voor het GitHub-account** zwaarder weegt dan
+€0-hosting op GitHub, gebruik het bestaande *private GitHub Actions*-project
+met voldoende uitvoerbudget, of een eigen self-hosted GitHub Actions runner.
+Deze opties omzeilen de voorwaarden voor gratis publieke hosted runners niet.
