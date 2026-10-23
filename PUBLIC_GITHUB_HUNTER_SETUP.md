@@ -11,8 +11,16 @@ because the code tests are green. It continues to require BOTH
 `AET_PUBLIC_HUNTER_ENABLED=true` and `AET_GITHUB_TERMS_APPROVED=true`;
 the latter must reflect GitHub's actual confirmation of permitted usage.
 Until then, live production scan effectiveness remains **unverified**.
-A single low-cost software-development HTTP smoke test (if performed) is not
-a 145-request original Hunter run and never changes private data or AET Pro.
+The separate `.github/workflows/live-search-smoke.yml` is a bounded software-
+development integration test: one live Marktplaats search request using the
+existing `scanner.fetch` + HTML parser, zero listing-detail requests, no
+secrets, no advertisement URLs/titles logged and no updates to AET Pro or
+private GitHub. An HTTP 403/429 is reported as a block with **no retry**.
+
+**A successful single-page smoke test is NOT a 145-request original Hunter run**,
+nor does it verify deal profit calculations, Facebook Actor execution,
+state commits, notification delivery or actual new AET Pro imports. Only an
+authorized full integration run can establish those separately.
 
 ## How it works
 
