@@ -98,3 +98,19 @@ Als **zo klein mogelijk risico voor het GitHub-account** zwaarder weegt dan
 €0-hosting op GitHub, gebruik het bestaande *private GitHub Actions*-project
 met voldoende uitvoerbudget, of een eigen self-hosted GitHub Actions runner.
 Deze opties omzeilen de voorwaarden voor gratis publieke hosted runners niet.
+
+## Extra activeringsbeveiliging — expliciete GitHub-bevestiging
+
+Een publieke productiejob wordt alleen gestart als BEIDE Actions Variables
+`AET_PUBLIC_HUNTER_ENABLED=true` EN `AET_GITHUB_TERMS_APPROVED=true` staan.
+De tweede variabele mag pas worden ingesteld na een duidelijke bevestiging van
+GitHub dat dit specifieke terugkerende commerciële werk is toegestaan. De
+standaardwaarde van beide is niet-ingesteld: de job wordt volledig overgeslagen.
+
+De enige veilige manier om te weten of GitHub deze toepassing toestaat, is
+het gebruik open en nauwkeurig voorleggen aan GitHub Support:
+https://support.github.com/ . De gebruiker moet zelf die bevestiging
+ontvangen; dit project kan GitHub-beleid niet veranderen of omzeilen.
+
+Een groen testresultaat betekent dat de softwaretests werken, niet dat
+GitHub commerciële hosting voor deze workflow heeft goedgekeurd.
