@@ -10,6 +10,8 @@ ALLOW = {
     "marktplaats_data.py", "marktplaats_market.py",
     "marktplaats_potential.py",
     "test_hunter.py", "test_marktplaats.py", "test_marktplaats_potential.py",
+    "facebook_vehicle_filter.py", "facebook_hunter.py",
+    "test_facebook_vehicle_filter.py", "test_facebook_hunter.py",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
