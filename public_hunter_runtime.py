@@ -167,6 +167,15 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         if platform == "facebook":
             print("facebook: provider_status=" + provider_status_label(status),
                   flush=True)
+            # Only a fixed Python exception type, never provider URLs,
+            # response bodies, listing data or token values.
+            kind=status.get("error_type")
+            if kind in ("TimeoutError","URLError","HTTPError","ValueError",
+                        "TypeError","JSONDecodeError","OSError"):
+                print("facebook: provider_exception="+kind,flush=True)
+            if status.get("recovered_existing") is True:
+                print("facebook: eerdere Apify-run hersteld zonder nieuwe start",
+                      flush=True)
         print(platform + ": healthy=" + str(healthy))
         if not healthy:
             return "unhealthy"

@@ -11,6 +11,8 @@ import json
 import math
 import os
 import tempfile
+import re
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -319,14 +321,9 @@ def provider_vehicle_fields(raw):
     return cleaned
 
 
-def fetch_actor(token, cap, opener=None, now=None):
-    """One bounded POST. A timeout may have started a billable Actor."""
-    if not isinstance(token, str) or len(token.strip()) < 15:
-        raise ValueError("Missing Apify token")
-    query = urlencode({"timeout": 90, "memory": 256,
-                       "maxItems": MAX_ITEMS_PER_RUN,
-                       "maxTotalChargeUsd": str(cap)})
-    payload = {
+def actor_payload(now=None):
+    """Shared, trade-focused actor input for sync compatibility and async starts."""
+    return {
         "searchQueries": query_group(now),
         "location": "Dronten, Netherlands",
         "strictKeywordMatch": True,
@@ -343,6 +340,16 @@ def fetch_actor(token, cap, opener=None, now=None):
         "maxPrice": 3000,
         "sortNewestFirst": True,
     }
+
+
+def fetch_actor(token, cap, opener=None, now=None):
+    """One bounded POST. A timeout may have started a billable Actor."""
+    if not isinstance(token, str) or len(token.strip()) < 15:
+        raise ValueError("Missing Apify token")
+    query = urlencode({"timeout": 90, "memory": 256,
+                       "maxItems": MAX_ITEMS_PER_RUN,
+                       "maxTotalChargeUsd": str(cap)})
+    payload = actor_payload(now)
     request = Request(BASE + "?" + query, method="POST",
                       data=json.dumps(payload).encode("utf-8"),
                       headers={"Authorization": "Bearer " + token.strip(),
@@ -359,6 +366,88 @@ def fetch_actor(token, cap, opener=None, now=None):
     if not isinstance(data, list):
         raise ValueError("Provider returned non-list dataset")
     return data[:MAX_ITEMS_PER_RUN]
+
+
+class PendingActorError(RuntimeError):
+    """An Actor may have started, so never initiate a second paid one."""
+
+
+class FinishedActorError(RuntimeError):
+    """Existing Actor finished unsuccessfully and may have consumed credits."""
+
+
+def start_actor_async(token, cap, opener=None, now=None):
+    """Start ONCE, return run identity immediately, never hold a long POST open.
+
+    Apify documents this asynchronous endpoint as the resilient alternative
+    to run-sync-get-dataset-items. maxTotalChargeUsd remains server enforced.
+    """
+    if not isinstance(token,str) or len(token.strip())<15:
+        raise ValueError("Missing Apify token")
+    if type(cap) not in (int,float) or not 0 < cap <= DEFAULT_MAX_RUN_USD:
+        raise ValueError("Apify Actor charge exceeds configured cap")
+    args=urlencode({"timeout":180, "memory":256,"maxItems":MAX_ITEMS_PER_RUN,
+                    "maxTotalChargeUsd":str(cap),"restartOnError":"false"})
+    url="https://api.apify.com/v2/acts/"+ACTOR+"/runs?"+args
+    request=Request(url,method="POST",
+        data=json.dumps(actor_payload(now)).encode("utf-8"),
+        headers={"Authorization":"Bearer "+token.strip(),
+                 "Content-Type":"application/json","Accept":"application/json"})
+    opener=opener or build_opener(NoRedirect())
+    with opener.open(request,timeout=20) as response:
+        if response.status not in (200,201):
+            raise ValueError("Unexpected Apify run start HTTP status")
+        raw=response.read(60_001)
+    if len(raw)>60_000:
+        raise ValueError("Oversized Apify run-start confirmation")
+    output=json.loads(raw.decode("utf-8"))
+    run=output.get("data") if isinstance(output,dict) else None
+    run_id=run.get("id") if isinstance(run,dict) else None
+    actor_id=run.get("actId") if isinstance(run,dict) else None
+    if (not isinstance(run_id,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",run_id)
+            or not isinstance(actor_id,str)
+            or not re.fullmatch(r"[A-Za-z0-9]{8,35}",actor_id)):
+        raise ValueError("Apify did not confirm a verifiable run identity")
+    options=run.get("options")
+    limit=options.get("maxTotalChargeUsd") if isinstance(options,dict) else None
+    if type(limit) not in (int,float) or abs(float(limit)-float(cap))>0.00001:
+        raise ValueError("Apify did not confirm a safe run charge limit")
+    return {"id":run_id,"actId":actor_id}
+
+
+def await_started_actor(token, marker, getter=None, pause=None, attempts=10):
+    """Read-only polling of ONE paid run, with bounded time and GET requests."""
+    pause=pause or time.sleep
+    for index in range(attempts):
+        state, rows=recover_uncertain_run(token,marker,getter=getter)
+        if state != "pending":
+            return state, rows
+        if index < attempts-1:
+            pause(12)
+    return "pending", None
+
+
+def launch_and_collect(token, cap, root, persist, now=None,
+                       starter=None, wait_for_result=None):
+    """Checkpoint known run ID before polling; preserve it on any error."""
+    now=now or datetime.now(timezone.utc)
+    starter=starter or start_actor_async
+    launched=starter(token,cap,now=now)
+    # Refuse to overwrite a malformed pending marker: no extra paid calls.
+    marker=load_pending_actor(root)
+    if marker is None:
+        raise ValueError("Missing durable pre-POST run marker")
+    marker["run_id"]=launched["id"]
+    marker["actor_id"]=launched["actId"]
+    atomic_json(Path(root)/PENDING_ACTOR_FILE,marker)
+    persist()
+    waiter=wait_for_result or await_started_actor
+    result, rows=waiter(token,marker)
+    if result=="recovered" and isinstance(rows,list):
+        return rows
+    if result=="failed":
+        raise FinishedActorError("Apify Actor did not complete successfully")
+    raise PendingActorError("Apify Actor result not yet verified")
 
 
 def read_only_provider_get(url, token, opener=None):
@@ -433,29 +522,40 @@ def recover_uncertain_run(token, marker, getter=None):
     actor_id = details.get("id") if isinstance(details,dict) else None
     if not isinstance(actor_id,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",actor_id):
         raise ValueError("Apify Actor identity could not be verified")
-    query = urlencode({"limit":50,"desc":1,
-                       "startedAfter":fmt(started-PENDING_WINDOW_BEFORE),
-                       "startedBefore":fmt(started+PENDING_WINDOW_AFTER)})
-    runs = getter(ACTOR_RUNS+"?"+query, token)
-    payload = runs.get("data") if isinstance(runs,dict) else None
-    rows = payload.get("items") if isinstance(payload,dict) else None
-    if not isinstance(rows,list) or len(rows)>=50:
-        raise ValueError("Unverifiable Apify run search")
-    matching = []
-    for row in rows:
-        if not isinstance(row,dict) or row.get("actId") != actor_id:
-            continue
-        try:
-            dt = datetime.fromisoformat(row["startedAt"].replace("Z","+00:00"))
-        except (KeyError, ValueError, AttributeError, TypeError):
-            continue
-        if dt.tzinfo and started-PENDING_WINDOW_BEFORE <= dt <= started+PENDING_WINDOW_AFTER:
-            matching.append(row)
-    if len(matching) != 1:
-        return "unresolved", None
-    id_ = matching[0].get("id")
-    if not isinstance(id_,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",id_):
-        raise ValueError("Invalid Apify run reference")
+    expected_id=marker.get("actor_id")
+    if expected_id is not None and expected_id!=actor_id:
+        raise ValueError("Persisted run has mismatched Apify Actor identity")
+    known_run=marker.get("run_id")
+    if known_run is not None:
+        if not isinstance(known_run,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",known_run):
+            raise ValueError("Invalid persisted Apify run ID")
+        id_=known_run
+    else:
+        # Legacy timed-out synchronous request: identify exactly one run
+        # within its bounded original time window, never guess by recency.
+        query = urlencode({"limit":50,"desc":1,
+                           "startedAfter":fmt(started-PENDING_WINDOW_BEFORE),
+                           "startedBefore":fmt(started+PENDING_WINDOW_AFTER)})
+        runs = getter(ACTOR_RUNS+"?"+query, token)
+        payload = runs.get("data") if isinstance(runs,dict) else None
+        rows = payload.get("items") if isinstance(payload,dict) else None
+        if not isinstance(rows,list) or len(rows)>=50:
+            raise ValueError("Unverifiable Apify run search")
+        matching = []
+        for row in rows:
+            if not isinstance(row,dict) or row.get("actId") != actor_id:
+                continue
+            try:
+                dt = datetime.fromisoformat(row["startedAt"].replace("Z","+00:00"))
+            except (KeyError, ValueError, AttributeError, TypeError):
+                continue
+            if dt.tzinfo and started-PENDING_WINDOW_BEFORE <= dt <= started+PENDING_WINDOW_AFTER:
+                matching.append(row)
+        if len(matching) != 1:
+            return "unresolved", None
+        id_ = matching[0].get("id")
+        if not isinstance(id_,str) or not re.fullmatch(r"[A-Za-z0-9]{8,35}",id_):
+            raise ValueError("Invalid Apify run reference")
     full = getter(ACTOR_RUNS+"/"+id_,token)
     run = full.get("data") if isinstance(full,dict) else None
     if not isinstance(run,dict) or run.get("id") != id_ or run.get("actId") != actor_id:
@@ -470,7 +570,7 @@ def recover_uncertain_run(token, marker, getter=None):
         if not isinstance(restored,list) or len(restored)>MAX_ITEMS_PER_RUN:
             raise ValueError("Apify recovered dataset format invalid")
         return "recovered", restored
-    if status in ("READY","RUNNING","TIMING-OUT"):
+    if status in ("READY","RUNNING","TIMING-OUT","ABORTING"):
         return "pending", None
     if status in ("FAILED","ABORTED","TIMED-OUT"):
         return "failed", None
@@ -607,7 +707,7 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
     try:
         rows = (recovered_rows if recovered_rows is not None else
                 (request_fn(token, cap) if request_fn
-                 else fetch_actor(token, cap, now=now)))
+                 else launch_and_collect(token,cap,root,persist,now=now)))
         if not rows:
             # Zero results can signal provider/API breakage; do not erase the
             # previous saved candidates or synchronize an empty Facebook feed.
@@ -688,6 +788,13 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 # The provider returned irrelevant parts or malformed entries,
                 # not proof that all historical cars have vanished.
                 status["status"] = "no_vehicle_candidates"
+    except PendingActorError:
+        status.update({"status":"provider_pending",
+                       "preflight_reason":"awaiting_existing_actor"})
+    except FinishedActorError:
+        status["status"]="provider_run_failed"
+        set_backoff(root,now)
+        (root / PENDING_ACTOR_FILE).unlink(missing_ok=True)
     except HTTPError as error:
         status.update({"status": "http_error", "http_status": error.code})
         safe_type = describe_provider_http_error(error)

@@ -490,6 +490,130 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertTrue((Path(d)/apify.COOLDOWN_FILE).exists())
             self.assertEqual(json.loads((Path(d)/"apify_budget.json").read_text())["calls"],1)
 
+    def test_async_start_uses_same_filters_and_hard_charge_cap(self):
+        from urllib.parse import parse_qs,urlsplit
+        captured={}
+        class Reply:
+            status=201
+            def __enter__(self):return self
+            def __exit__(self,*args):return False
+            def read(self,n):
+                return json.dumps({"data":{
+                    "id":"abcXYZ123456", "actId":"validactor12345",
+                    "options":{"maxTotalChargeUsd":0.05}}}).encode("utf-8")
+        class Opener:
+            def open(self,request,timeout=0):
+                captured["method"]=request.get_method()
+                captured["url"]=request.full_url
+                captured["payload"]=json.loads(request.data.decode("utf-8"))
+                captured["token"]=request.get_header("Authorization")
+                return Reply()
+        result=apify.start_actor_async("safe-token-value-1234567",0.05,
+                                       opener=Opener())
+        self.assertEqual(result["id"],"abcXYZ123456")
+        self.assertEqual(captured["method"],"POST")
+        self.assertEqual(urlsplit(captured["url"]).path,
+                         "/v2/acts/hydedata~facebook-marketplace-scraper/runs")
+        self.assertEqual(parse_qs(urlsplit(captured["url"]).query)
+                         ["maxTotalChargeUsd"],["0.05"])
+        self.assertEqual(captured["token"],"Bearer safe-token-value-1234567")
+        self.assertTrue(captured["payload"]["vehiclesOnly"])
+        self.assertTrue(captured["payload"]["includeDetails"])
+        self.assertEqual(captured["payload"]["maxPrice"],3000)
+        self.assertEqual(len(captured["payload"]["searchQueries"]),4)
+        self.assertNotIn("safe-token-value-1234567",captured["url"])
+
+    def test_async_start_refuses_unconfirmed_charge_limit(self):
+        class Reply:
+            status=201
+            def __enter__(self):return self
+            def __exit__(self,*args):return False
+            def read(self,n):
+                return json.dumps({"data":{"id":"abcXYZ123456",
+                    "actId":"validactor12345",
+                    "options":{"maxTotalChargeUsd":0.50}}}).encode()
+        class Opener:
+            def open(self,*args,**kw):return Reply()
+        with self.assertRaisesRegex(ValueError,"safe run charge limit"):
+            apify.start_actor_async("safe-token-value-1234567",0.05,
+                                    opener=Opener())
+
+    def test_async_start_restores_previous_run_without_duplicate_post(self):
+        now=datetime.now(timezone.utc)
+        env={"AET_FACEBOOK_ENABLED":"true",
+             "APIFY_TOKEN":"safe-token-value-1234567"}
+        car={"url":"https://www.facebook.com/marketplace/item/123456789/",
+             "title":"Opel Corsa 2012","price":950,"mileage_km":130000,
+             "seller_type":"particulier","listedAt":now.isoformat()}
+        with tempfile.TemporaryDirectory() as d:
+            saved=[]
+            def persist():
+                saved.append(json.loads((Path(d)/apify.PENDING_ACTOR_FILE).read_text())
+                             if (Path(d)/apify.PENDING_ACTOR_FILE).exists()
+                             else {})
+            def starter(token,cap,now):
+                self.assertEqual(cap,0.05)
+                self.assertEqual(len(saved),2)
+                return {"id":"abcXYZ123456","actId":"validactor12345"}
+            def waiter(token,marker):
+                self.assertEqual(marker["run_id"],"abcXYZ123456")
+                self.assertEqual(marker["actor_id"],"validactor12345")
+                return "recovered",[car]
+            with patch.object(apify,"start_actor_async",side_effect=starter):
+                with patch.object(apify,"await_started_actor",side_effect=waiter):
+                    result=apify.collect(d,env,persist,now=now,
+                        account_check=lambda *_:True)
+            self.assertEqual(result["status"],"ok")
+            self.assertEqual(result["accepted"],1)
+            self.assertFalse((Path(d)/apify.PENDING_ACTOR_FILE).exists())
+            self.assertEqual(len(saved),4)
+            self.assertEqual(json.loads((Path(d)/"apify_budget.json").read_text())["calls"],1)
+
+    def test_async_pending_preserves_id_and_never_starts_second_actor(self):
+        now=datetime.now(timezone.utc)
+        env={"AET_FACEBOOK_ENABLED":"true",
+             "APIFY_TOKEN":"safe-token-value-1234567"}
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(apify,"start_actor_async",return_value={
+                    "id":"abcXYZ123456","actId":"validactor12345"}) as start:
+                with patch.object(apify,"await_started_actor",
+                                  return_value=("pending",None)):
+                    first=apify.collect(d,env,lambda:None,now=now,
+                                        account_check=lambda *_:True)
+            self.assertEqual(first["status"],"provider_pending")
+            self.assertEqual(start.call_count,1)
+            marker=json.loads((Path(d)/apify.PENDING_ACTOR_FILE).read_text())
+            self.assertEqual(marker["run_id"],"abcXYZ123456")
+            with patch.object(apify,"start_actor_async") as blocked:
+                second=apify.collect(d,env,lambda:None,now=now,
+                    recovery_fn=lambda *_:("pending",None),
+                    account_check=lambda *_:self.fail("No extra preflight"))
+                self.assertEqual(second["status"],"provider_pending")
+                blocked.assert_not_called()
+            self.assertEqual(json.loads((Path(d)/"apify_budget.json").read_text())["calls"],1)
+
+    def test_direct_known_run_recovery_skips_actor_run_search(self):
+        started=datetime.now(timezone.utc)
+        expected="abcXYZ123456"
+        requested=[]
+        def getter(url,token):
+            requested.append(url)
+            if url==apify.ACTOR_INFO:
+                return {"data":{"id":"validactor12345"}}
+            if url==apify.ACTOR_RUNS+"/"+expected:
+                return {"data":{"id":expected,"actId":"validactor12345",
+                        "status":"SUCCEEDED","defaultDatasetId":"abCd12345678"}}
+            if url.startswith("https://api.apify.com/v2/datasets/"):
+                return [{"url":"https://www.facebook.com/marketplace/item/123/"}]
+            self.fail("No run-list search for known Apify run")
+        state,rows=apify.recover_uncertain_run(
+            "safe-token-value-1234567",
+            {"actor":apify.ACTOR,"started_at":started.isoformat(),
+             "run_id":expected,"actor_id":"validactor12345"},getter=getter)
+        self.assertEqual(state,"recovered")
+        self.assertEqual(len(rows),1)
+        self.assertEqual(len(requested),3)
+
     def test_provider_http_429_creates_real_cooldown_without_second_request(self):
         from urllib.error import HTTPError
         env = {"AET_FACEBOOK_ENABLED":"true",
