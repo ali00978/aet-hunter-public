@@ -2,7 +2,9 @@ name: AET Hunter offline development tests
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +16,8 @@ concurrency:
 
 jobs:
   offline-regression-tests:
+    # Do not burn hosted minutes automatically on arbitrary fork contributions.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
