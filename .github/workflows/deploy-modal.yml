@@ -1,15 +1,12 @@
 name: Deploy standalone PUBLIC Hunter to Modal (GitHub deploys only)
-
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - '.github/workflows/deploy-modal.yml'
-
 permissions:
   contents: read
-
 jobs:
   deploy:
     if: >-
@@ -23,25 +20,76 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run offline validation before deployment
+      - name: Check public runtime and tests
         run: |
           python public_guard.py
           python -m unittest -v test_public_hunter_runtime.py
           python -m py_compile ops/modal/public_hunter_modal.py public_hunter_runtime.py public_apify_collector.py hunter_feed.py hunter_pro_export.py hunter_pro_combined.py hunter_sync.py
-      - name: Check hosting credentials before installation
+      - name: Report missing hosting and sync credentials without showing values
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+        shell: bash
         run: |
-          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
-            echo "BLOCKED: no Modal host credentials configured. Marktplaats production not started."
-            echo "Add MODAL_TOKEN_ID and MODAL_TOKEN_SECRET in PUBLIC repository Actions secrets."
+          missing=0
+          for key in MODAL_TOKEN_ID MODAL_TOKEN_SECRET AET_PRO_SYNC_URL AET_HUNTER_SYNC_TOKEN; do
+            if [ -z "${!key}" ]; then
+              echo "MISSING GitHub Actions secret: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Production NOT started; add the named secrets privately in GitHub Settings."
             exit 1
           fi
-          echo "Modal credentials are configured."
+      - name: Verify genuine AET Pro token without uploading any vehicle
+        env:
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+        run: python -m ops.github.aet_pro_handshake
       - name: Install Modal deployment client
         run: python -m pip install 'modal>=1.0,<2'
-      - name: Deploy public Hunter (scan execution is external)
+      - name: Create isolated private Modal Secret from existing GitHub secrets
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          AET_FACEBOOK_ENABLED: ${{ vars.AET_FACEBOOK_ENABLED }}
+          AET_APIFY_MONTHLY_BUDGET_USD: ${{ vars.AET_APIFY_MONTHLY_BUDGET_USD }}
+          AET_APIFY_MAX_CHARGE_USD: ${{ vars.AET_APIFY_MAX_CHARGE_USD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          url = os.environ["AET_PRO_SYNC_URL"]
+          host = urlsplit(url)
+          if (host.scheme != "https" or host.hostname != "aet-cars-pro.eltakech100.workers.dev"
+              or host.path != "/api/integrations/hunter/sync" or host.query or host.fragment
+              or host.username or host.password or host.port not in (None, 443)):
+              raise ValueError("Incorrect AET Pro endpoint")
+          data = {"AET_PRO_SYNC_URL":url, "AET_HUNTER_SYNC_TOKEN":os.environ["AET_HUNTER_SYNC_TOKEN"],
+                  "AET_MODAL_LIVE_ENABLED":"I_ACCEPT_LIVE_SCANS", "AET_FACEBOOK_ENABLED":"false"}
+          if (os.getenv("AET_FACEBOOK_ENABLED") == "true" and os.getenv("APIFY_TOKEN")
+              and os.getenv("AET_APIFY_MONTHLY_BUDGET_USD")):
+              data.update({"AET_FACEBOOK_ENABLED":"true","APIFY_TOKEN":os.environ["APIFY_TOKEN"],
+                           "AET_APIFY_MONTHLY_BUDGET_USD":os.environ["AET_APIFY_MONTHLY_BUDGET_USD"],
+                           "AET_APIFY_MAX_CHARGE_USD":os.getenv("AET_APIFY_MAX_CHARGE_USD") or "0.10"})
+          dest = Path(os.environ["RUNNER_TEMP"]) / "aet-public-runtime.json"
+          fd = os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+          with os.fdopen(fd, "w", encoding="utf-8") as stream:
+              json.dump(data, stream)
+          print("Prepared private Modal settings; Facebook paid calls enabled:",data["AET_FACEBOOK_ENABLED"])
+          PY
+          trap 'rm -f "$RUNNER_TEMP/aet-public-runtime.json"' EXIT
+          modal secret create --force aet-public-hunter-runtime --from-json "$RUNNER_TEMP/aet-public-runtime.json"
+      - name: Deploy standalone public Hunter schedules to Modal
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
