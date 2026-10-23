@@ -43,8 +43,12 @@ def check_owner(env):
     test_env["AET_APIFY_MONTHLY_BUDGET_USD"] = str(MONTH_CAP)
     test_env["AET_APIFY_MAX_CHARGE_USD"] = str(RUN_CAP)
     monthly, cap = bounded_budget(test_env)
-    if monthly != MONTH_CAP or cap != RUN_CAP:
-        raise ValueError("One-time scan budget limits changed")
+    # This historical one-shot test may run under NEWER, STRICTER
+    # production limits. Do not fail simply because $0.06 was safely
+    # reduced to $0.05. Never permit spending above its original
+    # independent $4.00 / $0.06 authorization.
+    if not (0 < monthly <= MONTH_CAP and 0 < cap <= RUN_CAP):
+        raise ValueError("One-time scan budget limits exceeded")
     return test_env
 
 
