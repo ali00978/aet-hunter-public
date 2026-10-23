@@ -23,10 +23,14 @@ lekken tussen scans en offline tests te voorkomen.
 aanroep gebruikt nu het officieel ondersteunde asynchrone Apify-startpunt
 en slaat het door Apify bevestigde run-ID direct versleuteld op.
 Daarna volgen alleen gratis GET-statuscontroles en dataset-opvragingen;
+een bevestigd run-ID vereist geen extra Actor-metadata en het
+opgeslagen maximum van $0,05 wordt ook bij herstel geverifieerd.
 geen tweede betaalde POST. Ook een oude onzekere synchrone run
 wordt eerst via een begrensd tijdvenster gecontroleerd. De bestaande
 maximale $0,05 per run en $4,65 per maand blijven gehandhaafd.
 Eerdere advertenties en budgetgeschiedenis blijven beschermd.
+Bij een succesvolle hercontrole wordt alleen de echte controledatum
+vernieuwd: een mislukte scan maakt oude advertenties niet opnieuw 'nieuw'.
 Een nog actieve of onduidelijke run wordt als pending gemeld,
 niet als succesvolle import.
 
@@ -39,7 +43,8 @@ te herstellen. Bij ontbrekende, onduidelijke of nog lopende resultaten
 start de Hunter **geen tweede betaalde Actor**. Bij een succesvol
 herstel worden bestaande resultaten direct beoordeeld en aan AET Pro
 doorgestuurd, zonder extra Apify-start. De scan-ID in AET Pro gebruikt
-het stabiele GitHub-runnummer en -poging. Onzekere providerresponsen
+hetzelfde GitHub-runnummer bij iedere herstartpoging, zodat dezelfde
+logische scan niet opnieuw als een andere scan wordt geïmporteerd. Onzekere providerresponsen
 blijven zichtbaar als niet-geslaagde scan, niet als fictief succes.
 Bestaande budgetlimieten blijven intact.
 

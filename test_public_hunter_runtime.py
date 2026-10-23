@@ -2,7 +2,7 @@
 import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import URLError
@@ -53,8 +53,9 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
     def test_scan_ids_stable_within_github_run_and_private_status_sanitized(self):
         cfg={"GITHUB_RUN_ID":"456789123", "GITHUB_RUN_ATTEMPT":"2"}
-        self.assertEqual(runtime.durable_scan_identity(cfg),("456789123","2"))
-        self.assertEqual(runtime.durable_scan_identity(cfg),("456789123","2"))
+        self.assertEqual(runtime.durable_scan_identity(cfg),("456789123","1"))
+        self.assertEqual(runtime.durable_scan_identity(
+            {**cfg,"GITHUB_RUN_ATTEMPT":"3"}),("456789123","1"))
         invalid={"GITHUB_RUN_ID":"123abc","GITHUB_RUN_ATTEMPT":"1"}
         ident=runtime.durable_scan_identity(invalid)
         self.assertTrue(ident[0].isdigit())
@@ -599,6 +600,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
             def waiter(token,marker):
                 self.assertEqual(marker["run_id"],"abcXYZ123456")
                 self.assertEqual(marker["actor_id"],"validactor12345")
+                self.assertEqual(marker["charge_cap_usd"],0.05)
                 return "recovered",[car]
             with patch.object(apify,"start_actor_async",side_effect=starter):
                 with patch.object(apify,"await_started_actor",side_effect=waiter):
@@ -715,6 +717,42 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 getter=lambda url,token: {"data":{"id":"abcXYZ123456",
                            "actId":"differentactor98765","status":"SUCCEEDED",
                            "defaultDatasetId":"abCd12345678"}})
+
+    def test_known_run_rejects_mismatched_charge_limit(self):
+        now=datetime.now(timezone.utc)
+        marker={"actor":apify.ACTOR,"started_at":now.isoformat(),
+                "run_id":"abcXYZ123456","actor_id":"validactor12345",
+                "charge_cap_usd":0.05}
+        def getter(url,token):
+            return {"data":{"id":"abcXYZ123456","actId":"validactor12345",
+                "options":{"maxTotalChargeUsd":0.50},
+                "status":"SUCCEEDED","defaultDatasetId":"abCd12345678"}}
+        with self.assertRaisesRegex(ValueError,"charge limit"):
+            apify.recover_uncertain_run("safe-token-value-1234567",marker,
+                                         getter=getter)
+
+    def test_successful_refetch_updates_checked_without_rewriting_first_seen(self):
+        now=datetime.now(timezone.utc)
+        first=(now-timedelta(days=10)).isoformat()
+        url="https://www.facebook.com/marketplace/item/123456789/"
+        env={"AET_FACEBOOK_ENABLED":"true","APIFY_TOKEN":"safe-token-value-1234567"}
+        car={"url":url,"title":"Toyota Aygo 2012","price":950,
+             "mileage_km":100000,"listedAt":now.isoformat()}
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            apify.atomic_json(root/"apify_seen.json",{url:first})
+            result=apify.collect(folder,env,lambda:None,now=now,
+                                 request_fn=lambda *_:[car],
+                                 account_check=lambda *_:True)
+            self.assertEqual(result["status"],"ok")
+            saved=json.loads((root/"apify_kandidaten.json").read_text())
+            self.assertEqual(saved[0]["first_seen_at"],first)
+            self.assertEqual(saved[0]["checked_at"],now.isoformat())
+            empty=apify.collect(folder,env,lambda:None,now=now,
+                                request_fn=lambda *_:[],
+                                account_check=lambda *_:True)
+            self.assertEqual(empty["status"],"empty_response")
+            self.assertEqual(json.loads((root/"apify_kandidaten.json").read_text()),saved)
 
     def test_provider_http_429_creates_real_cooldown_without_second_request(self):
         from urllib.error import HTTPError

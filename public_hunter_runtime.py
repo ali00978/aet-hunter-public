@@ -90,15 +90,17 @@ def safe_scan_counters(status):
 def durable_scan_identity(env):
     """Use GitHub's stable job identity instead of a fresh nanosecond ID.
 
-    The same run/attempt should always produce the same AET Pro scan key,
-    including if the network sync is retried. Standalone dry-runs retain
-    the legacy timestamp fallback.
+    A repeated GitHub attempt belongs to the SAME logical scan, so keep
+    its ID stable across retries for AET Pro idempotency. Standalone
+    non-GitHub tests use the timestamp fallback.
     """
     run_id = str(env.get("GITHUB_RUN_ID") or "")
     attempt = str(env.get("GITHUB_RUN_ATTEMPT") or "1")
-    if run_id.isascii() and run_id.isdigit() and 1 <= len(run_id) <= 20 and (
-            attempt.isascii() and attempt.isdigit() and 1 <= len(attempt) <= 5):
-        return run_id, attempt
+    if (run_id.isascii() and run_id.isdigit()
+            and 1 <= len(run_id) <= 20
+            and attempt.isascii() and attempt.isdigit()
+            and 1 <= len(attempt) <= 5):
+        return run_id, "1"
     return str(time.time_ns()), "1"
 
 

@@ -439,6 +439,7 @@ def launch_and_collect(token, cap, root, persist, now=None,
         raise ValueError("Missing durable pre-POST run marker")
     marker["run_id"]=launched["id"]
     marker["actor_id"]=launched["actId"]
+    marker["charge_cap_usd"]=cap
     atomic_json(Path(root)/PENDING_ACTOR_FILE,marker)
     persist()
     waiter=wait_for_result or await_started_actor
@@ -584,6 +585,18 @@ def recover_uncertain_run(token, marker, getter=None):
     run = full.get("data") if isinstance(full,dict) else None
     if not isinstance(run,dict) or run.get("id") != id_ or run.get("actId") != actor_id:
         raise ValueError("Mismatched Apify run details")
+    # A confirmed async run must retain the original server-side cost cap.
+    # Older timed-out runs predate the cap marker and remain recoverable.
+    if "charge_cap_usd" in marker:
+        requested=marker["charge_cap_usd"]
+        options=run.get("options")
+        confirmed=(options.get("maxTotalChargeUsd")
+                   if isinstance(options,dict) else None)
+        if (type(requested) not in (int,float) or
+                type(confirmed) not in (int,float) or
+                not 0 < requested <= DEFAULT_MAX_RUN_USD or
+                abs(requested-confirmed) > 0.00001):
+            raise ValueError("Apify run charge limit not verifiable")
     status = run.get("status")
     if status == "SUCCEEDED":
         data_id = run.get("defaultDatasetId")
@@ -787,6 +800,10 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 if isinstance(normalized.get("description"), str):
                     normalized["description"] = normalized["description"][:600]
                 normalized["first_seen_at"] = first_seen or now.isoformat()
+                # This listing was actually inspected in this successful
+                # provider response. Do not confuse first discovery with
+                # last inspection, and never refresh a failed cached scan.
+                normalized["checked_at"] = now.isoformat()
                 provider_seller = str(raw.get("sellerType") or "").upper()
                 if provider_seller == "PRIVATE_SELLER":
                     normalized["seller_type"] = "particulier"

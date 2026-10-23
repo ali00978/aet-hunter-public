@@ -32,6 +32,20 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         row={**self.good,"listedAt":None}
         result=fb.normalize(row,"Apify",self.now)
         self.assertIn("Advertentiedatum onbekend",result["issues"])
+    def test_repeat_listing_uses_real_check_not_first_discovery(self):
+        first=(self.now-timedelta(days=15)).isoformat()
+        posted=(self.now-timedelta(days=20)).isoformat()
+        row={**self.good,"first_seen_at":first,"checked_at":self.now.isoformat(),
+             "listedAt":posted}
+        fresh=fb.normalize(row,"Apify",self.now)
+        self.assertEqual(fresh["checked_at"],self.now.isoformat())
+        self.assertEqual(fresh["posted_at"],posted)
+        old=fb.normalize({**row,"checked_at":first},"Apify",self.now,
+                         provider_at=self.now)
+        self.assertEqual(old["checked_at"],first)
+        self.assertEqual(fb.for_pro([old],archived=True)[0]["availability"],
+                         "historical_unverified")
+
     def test_provider_price_dict_is_not_confirmed(self):
         row={**self.good,"price":{"amount":850}}
         result=fb.normalize(row,"Social Fetch",self.now)

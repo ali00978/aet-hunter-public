@@ -150,7 +150,10 @@ def normalize(raw,source,now,provider_at=None):
     posted=when(raw.get("listedAt") or raw.get("listed_at"))
     # If date is missing, do not invent one: keep a visible warning.
     if posted and (posted>now+timedelta(hours=3) or now-posted>MAX_AGE):return None
-    observed=when(raw.get("first_seen_at") or raw.get("checked_at")) or provider_at
+    # Distinguish new observations from the first time this listing was seen.
+    # Old saved rows without checked_at stay conservatively historical.
+    observed=(when(raw.get("checked_at")) or
+              when(raw.get("first_seen_at")) or provider_at)
     if not observed or observed>now+timedelta(hours=3) or now-observed>MAX_AGE:return None
     seller=raw.get("seller_type")
     if seller=="handelaar":return None
