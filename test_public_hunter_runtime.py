@@ -116,5 +116,59 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertEqual(package["batch"], batch)
 
 
+    def test_real_public_export_pipeline_without_marketplace_network(self):
+        import scanner
+        import hunter_sync
+        import hunter_feed
+        import hunter_pro_combined
+        import facebook_hunter
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            env = {
+                "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+                "AET_PRO_SYNC_URL":
+                  "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                "AET_HUNTER_SYNC_TOKEN": "x" * 26,
+                "AET_HUNTER_STATE_DIR": d,
+            }
+            previous_roots = (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                              hunter_sync.ROOT, facebook_hunter.ROOT)
+            stages, payloads = [], []
+            def fake_scanner():
+                (root / "marktplaats_status.json").write_text(json.dumps(
+                    {"checked_at": now.isoformat(), "scan_health": "ok",
+                     "candidate_count": 0}), encoding="utf-8")
+                (root / "marktplaats_proefresultaten.json").write_text("[]",
+                    encoding="utf-8")
+                (root / "marktplaats_handmatig_controleren.json").write_text("[]",
+                    encoding="utf-8")
+                stages.append("scanner")
+            def fake_sync(payload, endpoint, token):
+                self.assertEqual(stages[:3], ["reload", "scanner", "persist"])
+                self.assertEqual(endpoint, env["AET_PRO_SYNC_URL"])
+                self.assertEqual(token, "x" * 26)
+                payloads.append(payload)
+                return {"received": True}
+            try:
+                with patch.object(scanner, "main", side_effect=fake_scanner):
+                    with patch.object(hunter_sync, "send", side_effect=fake_sync):
+                        outcome = runtime.run_platform(
+                            "marktplaats", env=env,
+                            persist=lambda: stages.append("persist"),
+                            reload=lambda: stages.append("reload"))
+                self.assertEqual(outcome, "synced")
+                self.assertEqual(len(payloads), 1)
+                self.assertEqual(payloads[0]["schema"], "aet-pro.hunter.sync.v1")
+                self.assertEqual(payloads[0]["batch"]["schema"], "aet-pro.hunter.v2")
+                self.assertEqual(payloads[0]["scan"]["platform"], "marktplaats")
+                self.assertEqual(payloads[0]["scan"]["candidate_ids"], [])
+                self.assertGreaterEqual(stages.count("persist"), 2)
+            finally:
+                (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                 hunter_sync.ROOT, facebook_hunter.ROOT) = previous_roots
+
+
+
 if __name__ == "__main__":
     unittest.main()
