@@ -19,13 +19,17 @@ def main() -> None:
     if os.environ.get("GITHUB_REF") != "refs/heads/main":
         raise RuntimeError("Refusing non-main execution of production code")
 
+    platform = os.environ.get("AET_HUNTER_PLATFORM", "")
+    if platform not in ("marktplaats", "facebook"):
+        raise RuntimeError("Must select exactly one allowed Hunter platform")
+
     from ops.modal.legacy_bridge import run_original_hunter, verify_credentials
     env = dict(os.environ)
-    # The established bridge has its own fail-closed production switch.
-    # Explicitly set it only after the public owner switch and credentials pass.
-    verify_credentials(env)
+    # Marketplaces are isolated: the Marktplaats job must not receive or need
+    # an Apify token. Facebook receives only its separate provider secret.
+    verify_credentials(env, platform=platform)
     env["AET_MODAL_LIVE_ENABLED"] = "I_ACCEPT_LIVE_SCANS"
-    run_original_hunter(env)
+    run_original_hunter(env, platform=platform)
 
 
 if __name__ == "__main__":
