@@ -14,7 +14,7 @@ import tempfile
 
 OWNER = "ali00978/aet-hunter-public"
 PRIVATE_REMOTE = "https://github.com/ali00978/aet-cars-ai-hunter.git"
-BRANCH = "fix/private-schedules-and-sync-guardrails"
+BRANCH = "fix/facebook-state-commit-recovery"
 
 # Must remain read-only: tests exercise every changed workflow's Python code.
 TEST_NAMES = (
@@ -23,7 +23,7 @@ TEST_NAMES = (
     "test_hunter_feed", "test_hunter_pro_export",
     "test_facebook_hunter", "test_facebook_vehicle_filter",
     "test_hunter_pro_combined", "test_facebook_tracking",
-    "test_hunter_sync", "test_apify_budget_guard",
+    "test_hunter_sync", "test_apify_budget_guard", "test_workflow_state_recovery",
 )
 
 OFFLINE_TEST_RUNNER = """
