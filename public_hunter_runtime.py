@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,52 @@ def load_object(path):
     if not isinstance(payload, dict):
         raise ValueError("Unexpected status format")
     return payload
+
+
+def run_scanner_with_progress(scan, interval_seconds=120, emit=None):
+    """Keep a GitHub Actions log responsive without revealing any listings.
+
+    Marketplace logs are intentionally redirected to /dev/null so URLs and
+    seller data never leave the runner. Progress uses an independent, fixed
+    aggregate message and does not make requests, shorten pacing or change
+    the scanner's selection/retry logic.
+    """
+    if emit is None:
+        def emit(message):
+            os.write(1, (message + "\\n").encode("utf-8"))
+    if not isinstance(interval_seconds, (int, float)) or interval_seconds <= 0:
+        raise ValueError("Invalid heartbeat interval")
+    stop = threading.Event()
+    started = time.monotonic()
+    def heartbeat():
+        while not stop.wait(interval_seconds):
+            minutes = max(0, int((time.monotonic()-started)//60))
+            emit(f"marktplaats: scan is actief na {minutes} minuten; "
+                 "geen versnelling of extra verzoeken")
+    worker = threading.Thread(target=heartbeat, name="aet-scan-progress",
+                              daemon=True)
+    emit("marktplaats: scan gestart; resultaten worden privé verwerkt")
+    worker.start()
+    try:
+        return scan()
+    finally:
+        stop.set()
+        worker.join(timeout=1)
+
+
+def safe_scan_counters(status):
+    """Only fixed numeric telemetry; never publish candidate/seller fields."""
+    if not isinstance(status,dict):
+        return None
+    fields=("search_pages_requested","detail_pages_attempted",
+            "requests_attempted_total")
+    values=[]
+    for field in fields:
+        value=status.get(field)
+        if type(value) is not int or not 0<=value<=145:
+            return None
+        values.append(value)
+    return tuple(values)
 
 
 def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
@@ -74,11 +121,16 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             try:
                 with open(os.devnull, "w", encoding="utf-8") as sink:
                     with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                        scanner.main()
+                        run_scanner_with_progress(scanner.main)
             finally:
                 # Keep restriction cooldown and history even if scanner fails.
                 persist()
             status = load_object(root / "marktplaats_status.json")
+            totals = safe_scan_counters(status)
+            if totals:
+                print("marktplaats: pagina's=" + str(totals[0]) +
+                      ", advertenties=" + str(totals[1]) +
+                      ", verzoeken=" + str(totals[2]), flush=True)
             healthy = status.get("scan_health") == "ok"
         else:
             from public_apify_collector import collect

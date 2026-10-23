@@ -12,6 +12,41 @@ import public_apify_collector as apify
 
 
 class StandaloneRuntimeTests(unittest.TestCase):
+    def test_marktplaats_progress_reports_only_aggregates_and_no_network(self):
+        from unittest.mock import patch
+        messages=[]
+        def scanner():
+            messages.append("scanned")
+            return "ok"
+        self.assertEqual(runtime.run_scanner_with_progress(
+            scanner, interval_seconds=120,
+            emit=lambda text: messages.append(text)), "ok")
+        self.assertEqual(messages[1], "scanned")
+        self.assertEqual(len(messages), 2)
+        self.assertTrue(messages[0].startswith("marktplaats: scan gestart"))
+        self.assertNotIn("http", messages[0].lower())
+
+    def test_marktplaats_progress_cleans_up_even_on_error(self):
+        from unittest.mock import patch
+        with self.assertRaisesRegex(ValueError,"scanner failed"):
+            runtime.run_scanner_with_progress(
+                lambda: (_ for _ in ()).throw(ValueError("scanner failed")),
+                emit=lambda text: None)
+        with self.assertRaises(ValueError):
+            runtime.run_scanner_with_progress(
+                lambda: None,interval_seconds=0,emit=lambda text: None)
+
+    def test_scan_counters_do_not_expose_private_data(self):
+        good={"search_pages_requested":28,"detail_pages_attempted":101,
+              "requests_attempted_total":129,
+              "seller_name":"private", "url":"https://example.test"}
+        self.assertEqual(runtime.safe_scan_counters(good),(28,101,129))
+        for invalid in ({**good,"detail_pages_attempted":True},
+                        {**good,"search_pages_requested":146},
+                        {**good,"requests_attempted_total":"129"},
+                        {"seller_name":"private"}):
+            self.assertIsNone(runtime.safe_scan_counters(invalid))
+
     def test_explicit_live_gate_precedes_all_network_and_sync(self):
         self.assertEqual(runtime.run_platform("marktplaats", env={}), "disabled")
         self.assertEqual(runtime.run_platform("facebook", env={}), "disabled")

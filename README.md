@@ -4,6 +4,15 @@ De openbare `ali00978/aet-hunter-public` repository bevat de zelfstandige
 Marktplaats-scanner, Facebook/Apify-verwerking, marktwaardebeoordeling en het
 bestaande AET Pro-importcontract.
 
+**Voortgang tijdens Marktplaats-scans:** de scanner bewaart de vertraging
+van vijf seconden tussen externe verzoeken, om onnodig veel belasting en
+beperkingsrisico te vermijden. GitHub krijgt om de twee minuten een
+anonieme melding dat de scan nog bezig is. Bij afronding wordt alleen
+een telling van zoek-/detailpagina's en verzoeken gelogd; géén URLs,
+verkopersnamen, advertentietekst, tokens of prijslijsten. Daardoor lijkt
+een langere, normaal draaiende scan niet meer vastgelopen. De eigenlijke
+selectie, cooldowns, requestlimieten en AET Pro-sync zijn niet veranderd.
+
 **Plan A:** GitHub Actions in deze **openbare** repository (geen privé-repository).
 De workflow `.github/workflows/public-original-hunter.yml` heeft
 een twee-uursplanning voor Marktplaats en een afzonderlijke Facebook-planning.
