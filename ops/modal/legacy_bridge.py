@@ -193,15 +193,18 @@ def scan_facebook(root: Path, env: dict[str, str]) -> None:
     # apify_test.py reserves a call in the budget BEFORE its HTTP request.
     # If the process crashes or times out, preserve that reservation rather
     # than repeatedly retrying an unrecorded potentially billable request.
+    # A provider call may already be billable when any downstream stage fails.
+    # Keep quota state across provider crashes, export errors and GitHub push
+    # conflicts; do not call the provider again during recovery.
     try:
         execute([sys.executable, "apify_test.py"], root, env, timeout=170)
+        execute([sys.executable, "hunter_pro_combined.py"], root, env, timeout=100)
+        publish_snapshots(root, env, FB_STATE, "Store Apify Facebook test results")
     except Exception:
         if budget_path.is_file():
             publish_snapshots(root, env, ("apify_budget.json",),
                               "Preserve Facebook provider call reservation after failure")
         raise
-    execute([sys.executable, "hunter_pro_combined.py"], root, env, timeout=100)
-    publish_snapshots(root, env, FB_STATE, "Store Apify Facebook test results")
     if get_status(root, "apify_status.json").get("status") != "ok":
         raise RuntimeError("Facebook/Apify result was not healthy: sync is skipped")
     execute([sys.executable, "hunter_sync.py", "facebook-apify", "--send"],

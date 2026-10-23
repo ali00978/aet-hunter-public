@@ -247,6 +247,54 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(__import__("json").loads(budget.read_text())["calls"], 32)
             self.assertFalse(any("hunter_sync.py" in x for x in run_commands))
 
+    def test_export_failure_after_provider_reserves_budget_without_sync(self):
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            budget = root / "apify_budget.json"
+            budget.write_text('{"month":"' + month + '","calls":31}', encoding="utf-8")
+            commands = []
+            def simulate(args, *_args, **_kwargs):
+                commands.append(args)
+                if "apify_test.py" in args:
+                    budget.write_text('{"month":"' + month + '","calls":32}', encoding="utf-8")
+                if "hunter_pro_combined.py" in args:
+                    raise RuntimeError("simulated combined export error")
+                return 0
+            with patch.object(bridge, "execute", side_effect=simulate), \
+                    patch.object(bridge, "publish_snapshots") as publish:
+                with self.assertRaisesRegex(RuntimeError, "combined export"):
+                    bridge.scan_facebook(root, {})
+            publish.assert_called_once_with(
+                root, {}, ("apify_budget.json",),
+                "Preserve Facebook provider call reservation after failure")
+            self.assertEqual(__import__("json").loads(budget.read_text())["calls"], 32)
+            self.assertFalse(any("hunter_sync.py" in args for args in commands))
+
+    def test_facebook_state_push_failure_recovers_budget_without_rescan(self):
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            budget = root / "apify_budget.json"
+            budget.write_text('{"month":"' + month + '","calls":4}', encoding="utf-8")
+            commands = []
+            def simulate(args, *_args, **_kwargs):
+                commands.append(args)
+                if "apify_test.py" in args:
+                    budget.write_text('{"month":"' + month + '","calls":5}', encoding="utf-8")
+                return 0
+            with patch.object(bridge, "execute", side_effect=simulate), \
+                    patch.object(bridge, "publish_snapshots",
+                                 side_effect=[RuntimeError("simulated state push failure"), None]) as publish:
+                with self.assertRaisesRegex(RuntimeError, "state push failure"):
+                    bridge.scan_facebook(root, {})
+            self.assertEqual(publish.call_count, 2)
+            self.assertEqual(publish.call_args_list[-1].args[2], ("apify_budget.json",))
+            self.assertEqual(sum("apify_test.py" in args for args in commands), 1)
+            self.assertFalse(any("hunter_sync.py" in args for args in commands))
+
     def test_invalid_monthly_counter_never_calls_provider(self):
         from datetime import datetime, timezone
         month = datetime.now(timezone.utc).strftime("%Y-%m")
