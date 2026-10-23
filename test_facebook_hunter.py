@@ -70,9 +70,23 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         exported=fb.for_pro([item])[0]
         self.assertEqual(exported["photo_urls"],item["photo_urls"])
 
-    def test_live_saved_facebook_sources(self):
-        output=fb.find_candidates()
-        self.assertGreater(output["count"],0,"Stored Facebook provider candidates should be readable")
-        self.assertEqual(len({r["id"] for r in output["candidates"]}),output["count"])
-        print("FACEBOOK_HUNTER_CANDIDATES:",output["count"])
+    def test_synthetic_saved_facebook_sources(self):
+        """Public CI must not rely on or publish private provider snapshots."""
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            second = {**self.good,
+                      "url": "https://www.facebook.com/marketplace/item/22222222222/",
+                      "title": "Opel Corsa 2011 airco",
+                      "price": 950}
+            (root / "apify_kandidaten.json").write_text(json.dumps([self.good]), encoding="utf-8")
+            (root / "socialfetch_kandidaten.json").write_text(json.dumps([second]), encoding="utf-8")
+            for name in ("apify_status.json", "socialfetch_status.json"):
+                (root / name).write_text(
+                    json.dumps({"status":"ok","checked_at":self.now.isoformat()}),
+                    encoding="utf-8",
+                )
+            with patch.object(fb, "ROOT", root):
+                output = fb.find_candidates(now=self.now)
+            self.assertEqual(output["count"], 2)
+            self.assertEqual(len({r["id"] for r in output["candidates"]}), 2)
 if __name__=="__main__":unittest.main()
