@@ -1,0 +1,66 @@
+name: AET Facebook recover existing Apify run (GET only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/facebook-recover-existing.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aet-public-original-hunter
+  cancel-in-progress: false
+
+jobs:
+  offline-check:
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'test: recover one already-started Apify run without a new scan' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cryptography>=45,<50'
+      - name: Offline regression and code safety guard
+        run: |
+          python public_guard.py
+          python run_offline_tests.py
+
+  recover-existing:
+    needs: offline-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cryptography>=45,<50'
+      - name: Restore encrypted history (NO new Actor start)
+        uses: actions/cache/restore@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            aet-hunter-state-v1-
+      - name: GET recent run / dataset, import into AET Pro only when verified
+        id: recover
+        env:
+          AET_READONLY_RECOVER: EXISTING_RUN_ONLY
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+        run: python -m ops.github.facebook_recover_existing
+      - name: Save encrypted app results and import marker
+        if: ${{ always() && steps.recover.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .aet-secure-state/state.enc
+          key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}

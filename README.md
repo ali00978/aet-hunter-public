@@ -50,6 +50,15 @@ auto's zijn. Er zijn geen handmatige/periodieke triggers voor deze test;
 blijft een gereserveerde Actor-aanroep meetellen en wordt niet opnieuw
 gestart. Dit is alleen voor integratieverificatie.
 
+**Herstel zonder nieuwe Actor-aanroep:** na de eenmalige Facebook-poging
+die eindigde in `request_failed` kan de afzonderlijke workflow
+`facebook-recover-existing.yml` uitsluitend de **bestaande** Actor-run
+uit het korte tijdvenster van 23 oktober 2026 tussen 16:20 en 16:26 UTC
+via geauthenticeerde **GET** opzoeken. Als die run compleet is,
+kan hij reeds betaalde datasetrecords via het normale filter naar AET Pro
+synchroniseren. Er wordt **geen** Apify Actor gestart en er is geen
+tweede commerciële scan. Kandidaten en een herstelmarker blijven versleuteld.
+
 **Plan B:** Modal met privé-volume staat voorbereid in
 `ops/modal/public_hunter_modal.py`. Een externe host is niet verplicht voor
 de developmenttests. De oude privé-repository, privé-Actions en haar opgeslagen

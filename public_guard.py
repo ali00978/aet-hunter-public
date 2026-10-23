@@ -36,6 +36,8 @@ ALLOW = {
     "PUBLIC_STANDALONE_SETUP.md",
     "ops/github/standalone_hunter_runner.py", "test_github_standalone.py",
     "ops/github/facebook_live_once.py", "test_facebook_live_once.py",
+    "ops/github/facebook_recover_existing.py", "test_facebook_recover_existing.py",
+    ".github/workflows/facebook-recover-existing.yml",
     ".github/workflows/facebook-one-time-integration.yml",
     ".github/workflows/marktplaats-one-time-integration.yml",
     "ops/github/public_marktplaats_integration.py",
@@ -176,6 +178,23 @@ if ("  workflow_dispatch:" not in private_pr_workflow
         or "secrets.APIFY_TOKEN" in private_pr_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" in private_pr_workflow):
     raise SystemExit("Private PR validation must be owner/main manual and never run paid providers")
+read_only_recover_workflow = Path(".github/workflows/facebook-recover-existing.yml").read_text(encoding="utf-8")
+if (not all(phrase in read_only_recover_workflow for phrase in (
+        "github.repository == 'ali00978/aet-hunter-public'",
+        "github.ref == 'refs/heads/main'",
+        "github.event.head_commit.message == 'test: recover one already-started Apify run without a new scan'",
+        "python -m ops.github.facebook_recover_existing",
+        "python run_offline_tests.py",
+        "secrets.APIFY_TOKEN", "secrets.AET_PRO_SYNC_URL",
+        "secrets.AET_HUNTER_SYNC_TOKEN",
+        "actions/cache/restore@v4", "actions/cache/save@v4",
+        "aet-public-original-hunter", "persist-credentials: false"))
+        or "  schedule:" in read_only_recover_workflow
+        or "  pull_request:" in read_only_recover_workflow
+        or "  workflow_dispatch:" in read_only_recover_workflow
+        or "secrets.AET_GITHUB_TOKEN" in read_only_recover_workflow):
+    raise SystemExit("Recover must run only once, read existing Apify data, and keep private state encrypted")
+
 facebook_once_workflow = Path(".github/workflows/facebook-one-time-integration.yml").read_text(encoding="utf-8")
 if (not all(word in facebook_once_workflow for word in (
         "github.repository == 'ali00978/aet-hunter-public'",
