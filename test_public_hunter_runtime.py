@@ -112,9 +112,11 @@ class StandaloneRuntimeTests(unittest.TestCase):
                                    account_check=lambda token, cap: True)
             self.assertEqual(status["status"], "ok")
             self.assertEqual(status["accepted"], 1)
-            self.assertEqual(marks[0], ("persist",))
-            self.assertEqual(marks[1][0], "provider_after_reservation")
-            self.assertEqual(marks[1][1], 1)
+            # Reserve and pending-Actor marker are BOTH durably saved
+            # before the first billable provider POST.
+            self.assertEqual(marks[:2],[("persist",),("persist",)])
+            self.assertEqual(marks[2][0], "provider_after_reservation")
+            self.assertEqual(marks[2][1], 1)
             stored = json.loads((Path(d)/"apify_kandidaten.json").read_text())
             self.assertEqual(len(stored), 1)
             self.assertEqual(stored[0]["title"], "Opel Corsa 2012")
