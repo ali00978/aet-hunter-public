@@ -101,13 +101,17 @@ def main() -> int:
                 check=False,
             )
             # The runner only emits aggregate counts; no private test output.
-            line = completed.stdout.strip()
-            if not re.fullmatch(
-                r"Private OFFLINE tests: [0-9]+ failures: [0-9]+ errors: [0-9]+ skipped: [0-9]+",
-                line,
-            ):
-                print("FAILED: unexpected private test execution result (details suppressed)")
+            summary_pattern = re.compile(
+                r"Private OFFLINE tests: [0-9]+ failures: [0-9]+ errors: [0-9]+ skipped: [0-9]+"
+            )
+            # Provider-budget unit tests may emit harmless test messages.
+            # Ignore ALL other output, never include private test text in public logs.
+            matches = [line.strip() for line in completed.stdout.splitlines()
+                       if summary_pattern.fullmatch(line.strip())]
+            if len(matches) != 1:
+                print("FAILED: private offline runner returned no unambiguous summary")
                 return 1
+            line = matches[0]
             print(line)
             print("No live search, provider run, private writes, or AET Pro POST.")
             return 0 if completed.returncode == 0 else 1
