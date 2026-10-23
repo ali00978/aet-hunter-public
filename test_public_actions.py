@@ -50,6 +50,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
             "AET_GITHUB_TERMS_APPROVED": "true",
             "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
             "GITHUB_REF": "refs/heads/main",
+            "AET_HUNTER_PLATFORM": "marktplaats",
         }
         with patch.dict(os.environ, env, clear=True):
             with patch("ops.modal.legacy_bridge.run_original_hunter") as run:
@@ -67,6 +68,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
             "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
             "AET_HUNTER_SYNC_TOKEN": "fake-synchronization-secret-26",
             "APIFY_TOKEN": "example-private-apify-token",
+            "AET_HUNTER_PLATFORM": "marktplaats",
         }
         with patch.dict(os.environ, env, clear=True):
             with patch("ops.modal.legacy_bridge.run_original_hunter") as run:
@@ -75,11 +77,67 @@ class PublicGithubRunnerTests(unittest.TestCase):
                 passed = run.call_args.args[0]
                 self.assertEqual(passed["AET_MODAL_LIVE_ENABLED"], "I_ACCEPT_LIVE_SCANS")
                 self.assertEqual(passed["AET_GITHUB_TOKEN"], env["AET_GITHUB_TOKEN"])
+                self.assertEqual(run.call_args.kwargs["platform"], "marktplaats")
+
+    def test_unselected_platform_is_blocked_even_with_valid_credentials(self):
+        env = {
+            "AET_PUBLIC_HUNTER_ENABLED": "true",
+            "AET_GITHUB_TERMS_APPROVED": "true",
+            "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
+            "GITHUB_REF": "refs/heads/main",
+            "AET_HUNTER_PLATFORM": "both",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "exactly one"):
+                main()
+
+    def test_marktplaats_does_not_require_apify_secret(self):
+        env = {
+            "AET_PUBLIC_HUNTER_ENABLED": "true",
+            "AET_GITHUB_TERMS_APPROVED": "true",
+            "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
+            "GITHUB_REF": "refs/heads/main",
+            "AET_HUNTER_PLATFORM": "marktplaats",
+            "AET_GITHUB_TOKEN": "fake-write-access-placeholder",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "fake-synchronization-secret-26",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch("ops.modal.legacy_bridge.run_original_hunter") as run:
+                main()
+                run.assert_called_once()
+                self.assertEqual(run.call_args.kwargs["platform"], "marktplaats")
+
+    def test_facebook_still_requires_apify_secret(self):
+        env = {
+            "AET_PUBLIC_HUNTER_ENABLED": "true",
+            "AET_GITHUB_TERMS_APPROVED": "true",
+            "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
+            "GITHUB_REF": "refs/heads/main",
+            "AET_HUNTER_PLATFORM": "facebook",
+            "AET_GITHUB_TOKEN": "fake-write-access-placeholder",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "fake-synchronization-secret-26",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch("ops.modal.legacy_bridge.run_original_hunter") as run:
+                with self.assertRaisesRegex(RuntimeError, "APIFY_TOKEN"):
+                    main()
+                run.assert_not_called()
 
     def test_public_workflow_is_gated_and_has_no_direct_scraper_steps(self):
         path = Path(__file__).parent / ".github/workflows/public-original-hunter.yml"
         content = path.read_text(encoding="utf-8")
         self.assertIn("cron: '17 */2 * * *'", content)
+        self.assertIn("cron: '47 2,14 * * *'", content)
+        self.assertIn("inputs.platform == 'facebook'", content)
+        self.assertIn("inputs.platform == 'marktplaats'", content)
+        mp, fb = content.split("  facebook:", 1)
+        self.assertNotIn("secrets.APIFY_TOKEN", mp)
+        self.assertIn("secrets.APIFY_TOKEN", fb)
+        self.assertIn("AET_HUNTER_PLATFORM: marktplaats", mp)
+        self.assertIn("AET_HUNTER_PLATFORM: facebook", fb)
+        self.assertIn("group: aet-public-original-hunter", content)
         self.assertIn("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'", content)
         self.assertIn("vars.AET_GITHUB_TERMS_APPROVED == 'true'", content)
         self.assertIn("AET_GITHUB_TOKEN: ", content)

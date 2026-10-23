@@ -1,0 +1,25 @@
+name: One-request Marktplaats development smoke (no production scans)
+on:
+  workflow_dispatch:
+  # One-time real search/page-parser development test; removed after run.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/live-search-smoke.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Request one public Marktplaats search page and check real parser
+        run: python ops/github/live_marktplaats_smoke.py
