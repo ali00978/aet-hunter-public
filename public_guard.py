@@ -20,6 +20,8 @@ ALLOW = {
     "ops/github/public_actions_runner.py", "test_public_actions.py",
     "ops/github/connection_preflight.py", "test_connection_preflight.py",
     ".github/workflows/manual-connection-preflight.yml",
+    "ops/github/provider_auth_probe.py", "test_provider_auth_probe.py",
+    ".github/workflows/manual-provider-auth-check.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
