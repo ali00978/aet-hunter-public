@@ -23,34 +23,44 @@ en privé-opslag staan gereed. Dit document is **geen bewijs dat Modal is gedepl
 - Geen enkele verkoopmarge wordt gegarandeerd; de AET Pro-import en
   automatische favorieten moeten na deployment nog end-to-end geverifieerd worden.
 
-## Eenmalige activering
+## Eenmalige activering — twee ontbrekende secrets
 
-1. Maak een account aan op https://modal.com/ en controleer het gratis
-   tegoed, limieten en eventuele betaalgegevens. De dienst kan geld kosten
-   buiten het gratis tegoed.
-2. Maak in Modal een Secret `aet-hunter-runtime` aan met:
-   `AET_PRO_SYNC_URL` (bestaande HTTPS AET Pro-endpoint),
-   `AET_HUNTER_SYNC_TOKEN` (bestaande geheime token),
-   `AET_MODAL_LIVE_ENABLED=0` (aanvankelijk uit).
-   Voor Facebook aanvullend `APIFY_TOKEN`,
-   `AET_FACEBOOK_ENABLED=true`, `AET_APIFY_MONTHLY_BUDGET_USD`
-   (jouw expliciet goedgekeurde budget, bv. `3.00`) en
-   `AET_APIFY_MAX_CHARGE_USD` (maximaal 0,50 per run; bv. `0.10`).
-   Bij gratis gebruik / onbekende prijslimiet: Facebook UIT laten.
-   **Nooit tokens in chats of publieke bestanden plakken.**
-3. Maak in de openbare GitHub-repo onder Settings > Secrets and variables >
-   Actions de geheime waarden `MODAL_TOKEN_ID` en `MODAL_TOKEN_SECRET`
-   aan. Ga naar Actions > **Deploy standalone PUBLIC Hunter to Modal**
-   > Run workflow. GitHub doet uitsluitend de deployment, geen terugkerende scans.
-4. Controleer op Modal dat de nieuwe app
-   `aet-cars-public-hunter` is gedeployed, inclusief beide crons.
-   Zet pas daarna in de Modal Secret
-   `AET_MODAL_LIVE_ENABLED=I_ACCEPT_LIVE_SCANS` om daadwerkelijke scans
-   te starten. Controleer dat de uitvoering de gewijzigde Secret gebruikt.
-5. Controleer de privé-opslag, scan-health, Marktplaats-kandidaten,
-   Facebook-quotum, foto's en HTTP 200/received van AET Pro.
-   Controleer favorieten in AET Pro afzonderlijk: sync is niet automatisch
-   hetzelfde als favoriet.
+De actuele openbare GitHub-deployment (23 oktober 2026) bevestigde dat
+`AET_PRO_SYNC_URL` en `AET_HUNTER_SYNC_TOKEN` aanwezig zijn in GitHub.
+**Alleen de twee Modal hostingsecrets ontbreken.**
+
+1. Maak bij https://modal.com/ een account aan. Controleer hoeveel
+   gratis tegoed je ontvangt, de kostenlimieten en eventuele betaalvoorwaarden.
+   Maak in de accountinstellingen een Modal API tokenpaar aan.
+2. Ga naar https://github.com/ali00978/aet-hunter-public/settings/secrets/actions
+   en voeg exact deze Repository secrets toe:
+   `MODAL_TOKEN_ID` en `MODAL_TOKEN_SECRET`.
+   Plak geheime waarden **nooit in een GitHub-codebestand of een chatbericht**.
+3. Open https://github.com/ali00978/aet-hunter-public/actions,
+   kies **Deploy standalone PUBLIC Hunter to Modal (GitHub deploys only)**,
+   klik **Run workflow** op branch `main`.
+4. De workflow controleert eerst de AET Pro-token zonder voertuigen
+   te importeren, zet de bestaande syncgeheimen over naar een
+   APARTE Modal Secret `aet-public-hunter-runtime`,
+   activeert automatisch de **openbare Marktplaats-scanner** en
+   maakt de privé-opslag `aet-cars-public-hunter-state`.
+   De originele privé-repository en bestaande privé-Modal Secret
+   blijven onaangeroerd.
+5. Controleer in Modal app `aet-cars-public-hunter` de geplande jobs,
+   de eerste scan-health en de AET Pro syncbevestiging.
+
+Facebook blijft financieel beveiligd en standaard uit. Als je later bewust
+Facebook wilt activeren, zet dan `APIFY_TOKEN` als Actions Secret en
+`AET_FACEBOOK_ENABLED=true`,
+`AET_APIFY_MONTHLY_BUDGET_USD` (eigen maximaal maandbudget),
+`AET_APIFY_MAX_CHARGE_USD` (maximaal 0,50 per run) als Actions Variables.
+Herhaal dan de deployment. Zonder deze budgetinstellingen start geen
+Facebook Apify-run.
+
+De benodigde GitHub-runner doet alleen softwaretests en de eenmalige deployment,
+nooit geplande commerciële advertentieverzoeken.
+Eventuele Modal- of Apify-uitgaven vallen onder je eigen abonnement,
+tegoed en ingestelde limieten.
 
 ## Wat deze route niet kan
 
