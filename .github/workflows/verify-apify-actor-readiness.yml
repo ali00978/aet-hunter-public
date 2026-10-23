@@ -1,10 +1,6 @@
 name: Verify Apify Actor and account headroom (GET only)
 on:
   workflow_dispatch:
-  # One-time owner-authorized read-only check, removed after this push.
-  push:
-    branches: [main]
-    paths: ['.github/workflows/verify-apify-actor-readiness.yml']
 
 permissions:
   contents: read
