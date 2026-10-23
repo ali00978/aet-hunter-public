@@ -1,0 +1,23 @@
+name: Verify original Hunter saved state (read only)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate private snapshots and read GitHub repo permission metadata
+        env:
+          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+        run: python ops/github/private_snapshot_preflight.py
