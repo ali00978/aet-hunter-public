@@ -29,7 +29,6 @@ class PublicGithubRunnerTests(unittest.TestCase):
     def test_unknown_repo_refused(self):
         with patch.dict(os.environ, {
                 "AET_PUBLIC_HUNTER_ENABLED": "true",
-            "AET_GITHUB_TERMS_APPROVED": "true",
                 "AET_GITHUB_TERMS_APPROVED": "true",
                 "GITHUB_REPOSITORY": "another-user/fork",
                 "GITHUB_REF": "refs/heads/main"}):
@@ -39,6 +38,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
     def test_nonmain_ref_refused(self):
         with patch.dict(os.environ, {
                 "AET_PUBLIC_HUNTER_ENABLED": "true",
+                "AET_GITHUB_TERMS_APPROVED": "true",
                 "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
                 "GITHUB_REF": "refs/heads/feature"}):
             with self.assertRaisesRegex(RuntimeError, "non-main"):
@@ -47,6 +47,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
     def test_missing_secrets_fail_closed(self):
         env = {
             "AET_PUBLIC_HUNTER_ENABLED": "true",
+            "AET_GITHUB_TERMS_APPROVED": "true",
             "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
             "GITHUB_REF": "refs/heads/main",
         }
