@@ -16,7 +16,8 @@ concurrency:
 
 jobs:
   offline-integration-tests:
-    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'test: one-time Facebook Apify integration to AET Pro' }}
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'test: one-time Facebook Apify integration to AET Pro' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
