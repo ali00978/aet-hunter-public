@@ -18,6 +18,8 @@ ALLOW = {
     "PUBLIC_GITHUB_HUNTER_SETUP.md",
     ".github/workflows/public-original-hunter.yml",
     "ops/github/public_actions_runner.py", "test_public_actions.py",
+    "ops/github/connection_preflight.py", "test_connection_preflight.py",
+    ".github/workflows/manual-connection-preflight.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
