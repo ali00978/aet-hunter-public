@@ -25,5 +25,7 @@ jobs:
           python-version: '3.12'
       - name: Verify no private data files or scheduled live scans are tracked
         run: python public_guard.py
+      - name: Compile Modal wrapper without running any scanner
+        run: python -m py_compile ops/modal/hunter_modal.py ops/modal/legacy_bridge.py
       - name: Run offline code tests with sockets disabled
         run: python run_offline_tests.py

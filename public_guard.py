@@ -12,6 +12,9 @@ ALLOW = {
     "test_hunter.py", "test_marktplaats.py", "test_marktplaats_potential.py",
     "facebook_vehicle_filter.py", "facebook_hunter.py",
     "test_facebook_vehicle_filter.py", "test_facebook_hunter.py",
+    "ops/modal/legacy_bridge.py", "ops/modal/hunter_modal.py",
+    "test_modal_bridge.py", ".github/workflows/deploy-modal.yml",
+    "MODAL_HUNTER_SETUP.md",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
