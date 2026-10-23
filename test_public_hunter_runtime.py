@@ -289,6 +289,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
                                        account_check=lambda *_: (_ for _ in ()).throw(
                                            ValueError("unknown free credits")))
             self.assertEqual(status["status"], "preflight_failed")
+            self.assertEqual(status["preflight_reason"], "provider_gate_unknown")
             provider.assert_not_called()
             self.assertFalse((Path(d)/"apify_budget.json").exists())
 

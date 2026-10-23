@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
 
+# Preflight-diagnostics-only change: POST remains capped at $0.06 and gated.
 # Share the existing private cache-lock. Never launch in parallel with
 # another public Hunter scan or reset the cached Apify spending counters.
 concurrency:

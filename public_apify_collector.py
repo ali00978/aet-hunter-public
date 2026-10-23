@@ -102,14 +102,15 @@ def verify_free_headroom(token, cap, opener=None):
         spent = current.get("monthlyUsageUsd") if isinstance(current, dict) else None
         if (type(maximum) not in (int, float) or type(spent) not in (int, float)
                 or not math.isfinite(maximum) or not math.isfinite(spent)
-                or spent < 0 or maximum <= 0
-                or maximum > FREE_MONTHLY_CREDIT_USD + .01):
-            raise ValueError("Free Apify plan could not be verified")
-        # Leave at least one dollar outside this Hunter's own reservation
-        # and at least half a dollar on the Apify account for other usage.
-        if (spent >= LOCAL_MONTHLY_RESERVE_USD or
-                spent + cap + 0.50 > maximum + 1e-8):
-            raise ValueError("Insufficient remaining free Apify credits")
+                or spent < 0 or maximum <= 0):
+            raise ValueError("apify_balance_format_unknown")
+        if maximum > FREE_MONTHLY_CREDIT_USD + .01:
+            raise ValueError("apify_account_limit_exceeds_free")
+        # Reserve a dollar outside this Hunter and $0.50 on the account.
+        if spent >= LOCAL_MONTHLY_RESERVE_USD:
+            raise ValueError("apify_free_monthly_reserve_exhausted")
+        if spent + cap + 0.50 > maximum + 1e-8:
+            raise ValueError("apify_remaining_free_credit_low")
     except (HTTPError, URLError, TimeoutError, OSError, UnicodeError,
             TypeError, KeyError, json.JSONDecodeError) as error:
         raise ValueError("Apify free-credit check failed; no Actor started") from error
@@ -228,7 +229,17 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
             verify_free_headroom(token, cap)
         else:
             account_check(token, cap)
-    except ValueError:
+    except ValueError as error:
+        # The only externally visible diagnostic is one of these fixed
+        # codes. Never log tokens, raw API responses, or credit amounts.
+        reason = str(error)
+        allowed_reasons = ("apify_balance_format_unknown",
+                           "apify_account_limit_exceeds_free",
+                           "apify_free_monthly_reserve_exhausted",
+                           "apify_remaining_free_credit_low",
+                           "Apify free-credit check failed; no Actor started")
+        status["preflight_reason"] = (
+            reason if reason in allowed_reasons else "provider_gate_unknown")
         atomic_json(root / "apify_status.json", status)
         persist()
         return status
