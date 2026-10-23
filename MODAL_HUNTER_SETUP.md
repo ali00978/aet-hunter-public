@@ -1,7 +1,7 @@
 # AET Hunter — Alternative Modal runner (prepared, not deployed)
 
 Modal Starter currently offers $30 monthly compute credit and 5 scheduled
-crons. This project uses 1 cron every two hours. Compute in excess of the
+crons. This project uses 1 cron every two hours: 12 Marktplaats runs/day and\nonly 2 Facebook provider runs/day (02:17 and 14:17 UTC). Compute in excess of the
 credit, or services outside included allowance, may be charged. Confirm
 your account's current prices and spending controls before activation.
 
@@ -48,7 +48,7 @@ available. Never merge the separate Oracle runner PR until an Oracle
 self-hosted runner is actually online.
 
 LIMITATIONS:
-- Not yet deployed: no Modal account, tokens, or secret is connected here.
+- Modal is prepared but NOT DEPLOYED until owner adds Modal credentials and\n  enables the private deployment. Neither the public Action nor this file\n  runs production scans without the user's configured hosting.\n- Not yet deployed: no Modal account, tokens, or secret is connected here.
 - The host must allow access to Marktplaats and Apify; their restrictions
   and cooldowns continue to apply.
 - Apify's original 100-calls/month cap does NOT support 360 fresh
