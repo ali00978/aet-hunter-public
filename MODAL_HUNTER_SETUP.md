@@ -1,15 +1,15 @@
 # AET Hunter — Alternative Modal runner (prepared, not deployed)
 
 Modal Starter currently offers $30 monthly compute credit and 5 scheduled
-crons. This project uses 1 cron every two hours: 12 Marktplaats runs/day and\nonly 2 Facebook provider runs/day (02:17 and 14:17 UTC). Compute in excess of the
+crons. This project uses 1 cron every two hours: 12 Marktplaats runs/day and
+only 2 Facebook provider runs/day (02:17 and 14:17 UTC). Compute in excess of the
 credit, or services outside included allowance, may be charged. Confirm
 your account's current prices and spending controls before activation.
 
 WHAT CHANGES: Only where the original Python code runs. A Modal container
 privately clones the original AET CARS repo, executes scanner.py and
 apify_test.py without changing them, pushes JSON state to the PRIVATE
-repo, and uses the original AET Pro sync endpoint. Every two hours it
-starts Marktplaats then Facebook in sequence to avoid Git push races.
+repo, and uses the original AET Pro sync endpoint. Every two hours it starts Marktplaats. At 02:17 and 14:17 UTC, it also starts Facebook after Marktplaats in the same private clone, avoiding concurrent state updates.
 
 WHAT DOES NOT CHANGE: private scan results, filters, candidate calculations,
 photos, deduplication, AET Pro database, and core scanner scripts.
@@ -48,11 +48,15 @@ available. Never merge the separate Oracle runner PR until an Oracle
 self-hosted runner is actually online.
 
 LIMITATIONS:
-- Modal is prepared but NOT DEPLOYED until owner adds Modal credentials and\n  enables the private deployment. Neither the public Action nor this file\n  runs production scans without the user's configured hosting.\n- Not yet deployed: no Modal account, tokens, or secret is connected here.
+- Modal is prepared but NOT DEPLOYED until owner adds Modal credentials and
+  enables the private deployment. Neither the public Action nor this file
+  runs production scans without the user's configured hosting.
+- Not yet deployed: no Modal account, tokens, or secret is connected here.
 - The host must allow access to Marktplaats and Apify; their restrictions
   and cooldowns continue to apply.
-- Apify's original 100-calls/month cap does NOT support 360 fresh
-  Facebook provider calls every month without changing the provider plan.
+- Facebook now has at most 62 scheduled starts in a 31-day month, plus any manual tests. The original 100-calls/month provider cap remains enforced. A cap on calls does not guarantee a spending limit.
+- If a Facebook provider request fails after reserving a call, its budget state is preserved privately and the failed run is not synchronized to AET Pro.
+- A scan outside GitHub receives its own numeric run ID; this prevents AET Pro from treating successive scans as a repeat of run 1.
 - Same Python code and filters are reused, but cloud timings may differ.
 - Existing private data never enters this public repository; it is
   handled by your personal Modal workspace and the original private repo.
