@@ -88,7 +88,18 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         if not healthy:
             return "unhealthy"
         now = datetime.now(timezone.utc)
-        combined = hunter_pro_combined.write(now=now)
+        if platform == "marktplaats":
+            # Mirror the original Hunter: retain both the app feed and
+            # the versioned Marktplaats export before the combined AET Pro batch.
+            import hunter_pro_export
+            mp_feed = hunter_feed.snapshot()
+            hunter_pro_export.write_payload(
+                target=root / "hunter_pro_export.json", feed=mp_feed)
+        # Always write inside the PRIVATE temp state directory. Calling
+        # write(now=now) would use the module's import-time default OUTPUT,
+        # which can point into the public checkout on a GitHub runner.
+        combined = hunter_pro_combined.write(
+            path=root / "hunter_pro_combined.json", now=now)
         persist()
         run_id = str(time.time_ns())
         package = hunter_sync.envelope(

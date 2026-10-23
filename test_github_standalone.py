@@ -68,6 +68,11 @@ class GithubStandaloneTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gh.unseal(b"not encrypted", TOKEN)
 
+    def test_private_app_exports_are_in_encrypted_state_allowlist(self):
+        for name in ("hunter_feed.json", "hunter_pro_export.json",
+                     "hunter_pro_combined.json"):
+            self.assertIn(name, gh.STATE_FILES)
+
     def test_unapproved_state_names_rejected(self):
         with self.assertRaises(ValueError):
             gh.seal({"schema": "aet.hunter.state.v1",

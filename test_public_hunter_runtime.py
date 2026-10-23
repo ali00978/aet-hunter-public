@@ -159,6 +159,18 @@ class StandaloneRuntimeTests(unittest.TestCase):
                             reload=lambda: stages.append("reload"))
                 self.assertEqual(outcome, "synced")
                 self.assertEqual(len(payloads), 1)
+                for filename in ("hunter_feed.json", "hunter_pro_export.json",
+                                 "hunter_pro_combined.json"):
+                    self.assertTrue((root / filename).is_file(), filename)
+                self.assertEqual(
+                    json.loads((root / "hunter_feed.json").read_text())["version"], 1)
+                self.assertEqual(
+                    json.loads((root / "hunter_pro_export.json").read_text())["schema"],
+                    "aet-pro.hunter.v1")
+                self.assertEqual(
+                    json.loads((root / "hunter_pro_combined.json").read_text())["schema"],
+                    "aet-pro.hunter.v2")
+                self.assertEqual(len(payloads), 1)
                 self.assertEqual(payloads[0]["schema"], "aet-pro.hunter.sync.v1")
                 self.assertEqual(payloads[0]["batch"]["schema"], "aet-pro.hunter.v2")
                 self.assertEqual(payloads[0]["scan"]["platform"], "marktplaats")
@@ -214,6 +226,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 self.assertEqual(outputs[0]["scan"]["platform"], "facebook")
                 self.assertEqual(outputs[0]["scan"]["candidate_ids"], ["facebook:123456789"])
                 self.assertEqual(outputs[0]["batch"]["platform_counts"]["facebook"], 1)
+                self.assertTrue((root / "hunter_pro_combined.json").is_file())
                 self.assertTrue(outputs[0]["batch"]["candidates"][0]["needs_inspection"])
             finally:
                 (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
