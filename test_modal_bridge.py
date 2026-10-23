@@ -23,6 +23,30 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "HTTPS"):
             bridge.verify_credentials(env)
 
+    def test_refuse_misconfigured_private_sync_url(self):
+        valid = {
+            key: "example-placeholder-secret-with-required-length"
+            for key in bridge.NEEDED
+        }
+        for bad_url in (
+            "https://user:pass@example.test/api/integrations/hunter/sync",
+            "https://example.test/api/integrations/hunter/sync?token=leak",
+            "https://example.test/other-endpoint",
+            "https://example.test:8080/api/integrations/hunter/sync",
+        ):
+            with self.subTest(endpoint=bad_url):
+                env = {**valid, "AET_PRO_SYNC_URL": bad_url}
+                with self.assertRaisesRegex(RuntimeError, "HTTPS Hunter sync endpoint"):
+                    bridge.verify_credentials(env)
+
+    def test_accept_private_https_sync_endpoint(self):
+        env = {
+            key: "example-placeholder-secret-with-required-length"
+            for key in bridge.NEEDED
+        }
+        env["AET_PRO_SYNC_URL"] = "https://example.test/api/integrations/hunter/sync"
+        bridge.verify_credentials(env)
+
     def test_only_json_state_may_be_pushed(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
