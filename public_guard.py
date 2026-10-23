@@ -132,7 +132,7 @@ if ("  workflow_dispatch:" not in live_smoke_workflow
         or "github.repository == 'ali00978/aet-hunter-public'" not in live_smoke_workflow
         or "github.ref == 'refs/heads/main'" not in live_smoke_workflow
         or "persist-credentials: false" not in live_smoke_workflow
-        or "ops/github/live_marktplaats_smoke.py" not in live_smoke_workflow
+        or "python -m ops.github.live_marktplaats_smoke" not in live_smoke_workflow
         or "secrets." in live_smoke_workflow):
     raise SystemExit("One-request live search smoke must never hold secrets or be scheduled")
 print("Public development tree passes allowlist, secrets and owner-gate checks")
