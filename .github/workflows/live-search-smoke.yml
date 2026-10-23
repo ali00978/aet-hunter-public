@@ -1,6 +1,10 @@
 name: One-request Marktplaats development smoke (no production scans)
 on:
   workflow_dispatch:
+  # One-time owner-authorized single public GET, reverted after completion.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/live-search-smoke.yml']
 
 permissions:
   contents: read
