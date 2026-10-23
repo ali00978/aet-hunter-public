@@ -72,8 +72,9 @@ for filename in tracked:
         if re.search(pattern, text):
             raise SystemExit(f"Potential credential found in {filename}")
 owner_workflow = Path(".github/workflows/public-original-hunter.yml").read_text(encoding="utf-8")
-if ("vars.AET_PUBLIC_HUNTER_ENABLED != 'false'" not in owner_workflow
-        or "github.event_name == 'push'" not in owner_workflow
+if ("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'" not in owner_workflow
+        or "vars.AET_GITHUB_TERMS_APPROVED == 'true'" not in owner_workflow
+        or "  push:" in owner_workflow
         or "github.repository == 'ali00978/aet-hunter-public'" not in owner_workflow
         or "runs-on: ubuntu-latest" not in owner_workflow
         or "cron: '17 */2 * * *'" not in owner_workflow
@@ -95,12 +96,12 @@ if ("vars.AET_PUBLIC_HUNTER_ENABLED != 'false'" not in owner_workflow
         or "legacy_bridge" in owner_workflow
         or "git clone" in owner_workflow
         or "upload-artifact" in owner_workflow):
-    raise SystemExit("Public GitHub workflow must stay owner-only, stand-alone, encrypted and private-data-safe")
+    raise SystemExit("Public GitHub production must remain owner-only, terms-gated, encrypted and private-data-safe")
 if ("secrets.AET_GITHUB_TOKEN" not in owner_workflow and "AET_STATE_BOOTSTRAP:" in owner_workflow
-        and "github.event_name == 'push'" in owner_workflow):
+        and "vars.AET_GITHUB_TERMS_APPROVED" in owner_workflow):
     pass
 else:
-    raise SystemExit("Public Hunter requires an owner-triggered first encrypted-state bootstrap")
+    raise SystemExit("Public Hunter requires confirmed terms approval and manual encrypted-state bootstrap")
 
 read_only_workflow = Path(".github/workflows/verify-github-apify-readonly.yml").read_text(encoding="utf-8")
 if ("  workflow_dispatch:" not in read_only_workflow

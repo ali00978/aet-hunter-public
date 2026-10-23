@@ -1,9 +1,5 @@
 name: AET Hunter PUBLIC standalone scanners (GitHub Plan A)
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/public-original-hunter.yml'
   workflow_dispatch:
     inputs:
       platform:
@@ -30,7 +26,7 @@ concurrency:
 jobs:
   marktplaats:
     if: >-
-      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED != 'false' && (github.event_name == 'push' || inputs.platform == 'marktplaats' || github.event.schedule == '17 */2 * * *') }}
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' && (github.event.schedule == '17 */2 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'marktplaats')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -52,7 +48,8 @@ jobs:
         id: scan
         env:
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
-          AET_STATE_BOOTSTRAP: ${{ (github.event_name == 'push' || inputs.bootstrap_state) && 'true' || 'false' }}
+          AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
+          AET_STATE_BOOTSTRAP: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_state && 'true' || 'false' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -68,7 +65,7 @@ jobs:
           key: aet-hunter-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
   facebook:
     if: >-
-      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED != 'false' && vars.AET_FACEBOOK_ENABLED == 'true' && (github.event.schedule == '47 2,14 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'facebook')) }}
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' && vars.AET_FACEBOOK_ENABLED == 'true' && (github.event.schedule == '47 2,14 * * *' || (github.event_name == 'workflow_dispatch' && inputs.platform == 'facebook')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -90,6 +87,7 @@ jobs:
         id: scan
         env:
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
+          AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
           AET_FACEBOOK_ENABLED: ${{ vars.AET_FACEBOOK_ENABLED }}
           AET_APIFY_MONTHLY_BUDGET_USD: ${{ vars.AET_APIFY_MONTHLY_BUDGET_USD }}
           AET_APIFY_MAX_CHARGE_USD: ${{ vars.AET_APIFY_MAX_CHARGE_USD }}

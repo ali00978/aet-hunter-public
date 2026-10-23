@@ -45,15 +45,15 @@ DEFAULT_ENCRYPTED_FILE = ".aet-secure-state/state.enc"
 
 def authorize(env):
     """Never confuse repository variables with actual permission from GitHub."""
-    if env.get("AET_PUBLIC_HUNTER_ENABLED") == "false":
+    if env.get("AET_PUBLIC_HUNTER_ENABLED") != "true":
         raise PermissionError("Public Hunter is disabled by repository settings")
+    if env.get("AET_GITHUB_TERMS_APPROVED") != "true":
+        raise PermissionError("Production hosting requires explicit GitHub authorization")
     if env.get("GITHUB_REPOSITORY") != OWNER or env.get("GITHUB_REF") != MAIN:
         raise PermissionError("Only the owner public main branch may scan")
     event = env.get("GITHUB_EVENT_NAME")
-    if event not in ("schedule", "workflow_dispatch", "push"):
-        raise PermissionError("Only the owner schedule, manual dispatch or activation push is trusted")
-    if event == "push" and env.get("AET_STATE_BOOTSTRAP") != "true":
-        raise PermissionError("Push may only start the owner-authorized first activation")
+    if event not in ("schedule", "workflow_dispatch"):
+        raise PermissionError("Only the owner schedule or manual dispatch is trusted")
     platform = env.get("AET_HUNTER_PLATFORM")
     if platform not in ("marktplaats", "facebook"):
         raise ValueError("Choose exactly one Hunter platform")
@@ -174,7 +174,7 @@ def execute(env=None, platform_runner=None):
         cache = Path.cwd() / cache
     token = env["AET_HUNTER_SYNC_TOKEN"]
     initialize = (env.get("AET_STATE_BOOTSTRAP") == "true" and
-                  env.get("GITHUB_EVENT_NAME") in ("workflow_dispatch", "push") and
+                  env.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and
                   platform == "marktplaats")
     with tempfile.TemporaryDirectory(prefix="aet-hunter-private-") as tmp:
         root = Path(tmp)

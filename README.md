@@ -7,10 +7,11 @@ bestaande AET Pro-importcontract.
 **Plan A:** GitHub Actions in deze **openbare** repository (geen privé-repository).
 De workflow `.github/workflows/public-original-hunter.yml` heeft
 een twee-uursplanning voor Marktplaats en een afzonderlijke Facebook-planning.
-De eigenaar heeft opdracht gegeven eenmalig de openbare Marktplaats-scan
-te activeren. Bij de eerste succesvolle run worden de scanresultaten
-beveiligd gesynchroniseerd met AET Pro en de historie versleuteld
-gecachet. Een mislukte of overgeslagen run bewijst geen productiewerking.
+De eigenaar heeft daarna gevraagd zijn account niet onnodig bloot te
+stellen aan accountbeperkingen. Daarom is de terugkerende commerciële
+scan standaard gepauzeerd totdat expliciete toestemming van GitHub
+voor deze workload is bevestigd. Ontwikkeling en tests blijven actief;
+een mislukte of overgeslagen run is geen productiebewijs.
 
 **GitHub-gebruiksvoorwaarden:** GitHub-hosted Actions mag volgens de
 Additional Product Terms niet voor willekeurige commerciële workloads worden
