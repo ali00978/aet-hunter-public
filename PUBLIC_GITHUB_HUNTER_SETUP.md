@@ -4,14 +4,29 @@
 workflow, but the entire job is skipped until you explicitly enable it.
 No credentials were copied and no commercial live scan was started.
 
+## Status of requested live scan and one-time development smoke tests
+
+This workflow **will not** start scheduled or manual commercial scans merely
+because the code tests are green. It continues to require BOTH
+`AET_PUBLIC_HUNTER_ENABLED=true` and `AET_GITHUB_TERMS_APPROVED=true`;
+the latter must reflect GitHub's actual confirmation of permitted usage.
+Until then, live production scan effectiveness remains **unverified**.
+A single low-cost software-development HTTP smoke test (if performed) is not
+a 145-request original Hunter run and never changes private data or AET Pro.
+
 ## How it works
 
-- GitHub public Actions runs one job at 17 minutes past every second hour.
-- That job clones the **original private** AET CARS AI Hunter repository into
-  an ephemeral container, using a fine-grained, private GitHub token.
-- It runs the original Marktplaats scanner, historical-state updates, filters,
-  report builders and AET Pro sync. Then it runs the original Facebook Apify
-  scanner and AET Pro sync. These are sequential rather than concurrent.
+- The Marktplaats job is scheduled at minute **17, every two hours**.
+- The Facebook/Apify job is independently scheduled at **02:47 and 14:47 UTC**,
+  so it uses at most 62 scheduled provider starts in a 31-day month, not 360+.
+- Each job clones the **original private** AET CARS AI Hunter repository into
+  an ephemeral container using a fine-grained token; each invokes **only**
+  its own original scanner, update builder and AET Pro synchronization.
+- A shared workflow-level concurrency lock prevents races in the private
+  combined JSON snapshots. Facebook failures/quota do not execute or fail
+  the Marktplaats job.
+- Manual workflow dispatch requires selecting **one** platform. The
+  Marktplaats job never receives the Apify token.
 - The same private JSON files are committed ONLY back to your original PRIVATE
   repository; not to the public repo, workflow logs, or downloadable artifacts.
 - The user-facing AET Pro app is not modified.
@@ -34,7 +49,8 @@ this runner deliberately suppresses raw scanner output and errors containing
 provider data. The public workflow has read-only permissions in this public
 repository. Secrets are not available to fork pull-request workflows.
 
-When all four secrets have been set and access has been verified, create
+Only AFTER GitHub explicitly confirms that this **specific** commercial hosted
+runner workload is allowed, and all credentials have been validated, create
 repository variable `AET_PUBLIC_HUNTER_ENABLED` with value `true` in
 https://github.com/ali00978/aet-hunter-public/settings/variables/actions .
 Until then scheduled and manual actions are skipped, not failed.
