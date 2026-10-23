@@ -64,6 +64,43 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.provider_status_label({
             "status":"https://untrusted.example/secrets"}),"unknown")
 
+    def test_aet_pro_sync_receipt_is_bounded_and_requires_true(self):
+        import hunter_sync
+        endpoint=("https://aet-cars-pro.eltakech100.workers.dev"
+                  "/api/integrations/hunter/sync")
+        token="x"*26
+        responses=[
+            (b'{"received":true,"count":2}',True),
+            (b'{"received":false}',False),
+            (b'{"received":"true"}',False),
+            (b'[]',False),
+            (b'not-json',False),
+            (b'{' + b'x'*70_000 + b'}',False)
+        ]
+        class Reply:
+            status=200
+            def __init__(self,raw):self.raw=raw
+            def __enter__(self):return self
+            def __exit__(self,*args):return False
+            def read(self,n):return self.raw[:n]
+        class Opener:
+            def __init__(self,raw):self.raw=raw
+            def open(self,request,timeout=0):
+                self_outer.assertEqual(request.get_method(),"POST")
+                self_outer.assertEqual(timeout,20)
+                return Reply(self.raw)
+        self_outer=self
+        for raw,valid in responses:
+            with self.subTest(valid=valid,size=len(raw)):
+                with patch.object(hunter_sync,"build_opener",
+                                  return_value=Opener(raw)):
+                    if valid:
+                        result=hunter_sync.send({"test":True},endpoint,token)
+                        self.assertIs(result["received"],True)
+                    else:
+                        with self.assertRaises(ValueError):
+                            hunter_sync.send({"test":True},endpoint,token)
+
     def test_pro_endpoint_rejects_other_origins_and_token_in_url(self):
         token = "x" * 26
         good = "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync"

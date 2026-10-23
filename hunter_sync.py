@@ -94,8 +94,16 @@ def send(payload, endpoint, token):
             with build_opener(NoRedirects()).open(request, timeout=20) as response:
                 if response.status != 200:
                     raise ValueError("Unexpected sync HTTP " + str(response.status))
-                answer = json.load(response)
-                if answer.get("received") is not True:
+                # A public GitHub job must never stream an unbounded response
+                # from AET Pro or mistake malformed JSON for confirmation.
+                raw = response.read(64_001)
+                if len(raw) > 64_000:
+                    raise ValueError("AET Pro sync receipt exceeds safety limit")
+                try:
+                    answer = json.loads(raw.decode("utf-8"))
+                except (UnicodeError, ValueError):
+                    raise ValueError("AET Pro sync receipt is not valid JSON") from None
+                if not isinstance(answer, dict) or answer.get("received") is not True:
                     raise ValueError("AET PRO did not confirm synchronization")
                 return answer
         except HTTPError as error:
@@ -128,7 +136,9 @@ def main():
         raise RuntimeError("AET Pro sync missing required Actions secrets: "
                            "AET_PRO_SYNC_URL and/or AET_HUNTER_SYNC_TOKEN")
     outcome = send(payload, endpoint, token)
-    print("AET PRO confirmed:", json.dumps(outcome, ensure_ascii=False))
+    # Never echo a potentially unexpected private Worker response into
+    # public GitHub Actions logs. The receipt itself is sufficient.
+    print("AET PRO confirmed receipt")
     return 0
 
 

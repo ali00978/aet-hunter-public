@@ -4,6 +4,12 @@ De openbare `ali00978/aet-hunter-public` repository bevat de zelfstandige
 Marktplaats-scanner, Facebook/Apify-verwerking, marktwaardebeoordeling en het
 bestaande AET Pro-importcontract.
 
+**AET Pro-overdracht:** de ontvangende Worker moet voortaan binnen een
+begrensd JSON-antwoord expliciet `received: true` teruggeven. Onjuiste,
+te grote of niet-leesbare antwoorden worden niet als succes geteld.
+Openbare Actions-logboeken tonen uitsluitend de bevestiging, zonder
+de ongefilterde serverrespons.
+
 **Laatste kwaliteitscontrole:** een reeds bevestigde Apify-run vereist
 alleen het uitlezen van het eigen run-ID, niet telkens extra Actor-metadata.
 Bij HTTP 429 of wegvallende netwerkverbinding tijdens het opvragen van
