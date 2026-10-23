@@ -28,15 +28,21 @@ jobs:
           python public_guard.py
           python -m unittest -v test_public_hunter_runtime.py
           python -m py_compile ops/modal/public_hunter_modal.py public_hunter_runtime.py public_apify_collector.py hunter_feed.py hunter_pro_export.py hunter_pro_combined.py hunter_sync.py
+      - name: Check hosting credentials before installation
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "BLOCKED: no Modal host credentials configured. Marktplaats production not started."
+            echo "Add MODAL_TOKEN_ID and MODAL_TOKEN_SECRET in PUBLIC repository Actions secrets."
+            exit 1
+          fi
+          echo "Modal credentials are configured."
       - name: Install Modal deployment client
         run: python -m pip install 'modal>=1.0,<2'
       - name: Deploy public Hunter (scan execution is external)
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-        run: |
-          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
-            echo "Modal deployment unavailable: MODAL_TOKEN_ID / MODAL_TOKEN_SECRET must be configured as GitHub Actions secrets."
-            exit 1
-          fi
-          modal deploy ops/modal/public_hunter_modal.py
+        run: modal deploy ops/modal/public_hunter_modal.py
