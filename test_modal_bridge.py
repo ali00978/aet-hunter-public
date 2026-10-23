@@ -140,6 +140,51 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(any("facebook-apify" in c.args[0] and "hunter_sync.py" in c.args[0]
                                 for c in command.call_args_list))
 
+    def test_marktplaats_credentials_do_not_need_apify(self):
+        env = {
+            "AET_GITHUB_TOKEN": "placeholder-token",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "SYNTHETIC-LONG-SYNC-TOKEN-PLACEHOLDER",
+        }
+        bridge.verify_credentials(env, platform="marktplaats")
+        with self.assertRaisesRegex(RuntimeError, "APIFY_TOKEN"):
+            bridge.verify_credentials(env, platform="facebook")
+
+    def test_platform_selection_isolated_from_other_scan(self):
+        env = {
+            "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+            "AET_GITHUB_TOKEN": "placeholder-token",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "SYNTHETIC-LONG-SYNC-TOKEN-PLACEHOLDER",
+            "APIFY_TOKEN": "synthetic-only",
+        }
+        with patch.object(bridge, "prepare_clone", return_value=Path("/tmp/synthetic")), \
+                patch.object(bridge, "scan_marktplaats") as mp, \
+                patch.object(bridge, "scan_facebook") as fb:
+            bridge.run_original_hunter(env, platform="marktplaats")
+            mp.assert_called_once()
+            fb.assert_not_called()
+            mp.reset_mock()
+            bridge.run_original_hunter(env, platform="facebook")
+            mp.assert_not_called()
+            fb.assert_called_once()
+
+    def test_facebook_monthly_limit_skips_without_api_or_sync(self):
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        with patch.object(bridge, "get_status", return_value={"month": month, "calls": 100}), \
+                patch.object(bridge, "execute") as execute, \
+                patch.object(bridge, "publish_snapshots") as publish:
+            bridge.scan_facebook(Path("/tmp/unused"), {})
+            execute.assert_not_called()
+            publish.assert_not_called()
+
+    def test_disabled_platform_does_not_clone(self):
+        with patch.object(bridge, "prepare_clone") as clone:
+            bridge.run_original_hunter({"AET_MODAL_LIVE_ENABLED": "false"}, platform="facebook")
+            clone.assert_not_called()
+
+
 
 if __name__ == "__main__":
     unittest.main()
