@@ -8,6 +8,9 @@ import os
 
 def main() -> None:
     # Fail closed: this must be an intentional switch on the owner repository.
+    if os.environ.get("AET_GITHUB_TERMS_APPROVED") != "true":
+        print("Awaiting explicit GitHub hosted-runner usage approval; no live scan")
+        return
     if os.environ.get("AET_PUBLIC_HUNTER_ENABLED") != "true":
         print("Public GitHub scan not enabled; no marketplace access")
         return
