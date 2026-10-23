@@ -30,6 +30,10 @@ ALLOW = {
     ".github/workflows/verify-private-snapshot-readonly.yml",
     "ops/github/live_marktplaats_smoke.py", "test_live_marktplaats_smoke.py",
     ".github/workflows/live-search-smoke.yml",
+    "hunter_feed.py", "hunter_pro_export.py", "hunter_pro_combined.py",
+    "hunter_sync.py", "public_apify_collector.py", "public_hunter_runtime.py",
+    "test_public_hunter_runtime.py", "ops/modal/public_hunter_modal.py",
+    "PUBLIC_STANDALONE_SETUP.md",
     ".github/workflows/marktplaats-one-time-integration.yml",
     "ops/github/public_marktplaats_integration.py",
     "ops/github/private_pr_offline_validation.py",
@@ -164,5 +168,13 @@ if ("  workflow_dispatch:" not in one_time_workflow
         or "secrets." in one_time_workflow
         or "actions/upload-artifact" in one_time_workflow):
     raise SystemExit("One-time Marktplaats integration must stay owner-only, unscheduled, and secret-free")
+
+modal_workflow = Path(".github/workflows/deploy-modal.yml").read_text(encoding="utf-8")
+if ("modal deploy ops/modal/public_hunter_modal.py" not in modal_workflow
+        or "  schedule:" in modal_workflow
+        or "python -m unittest -v test_public_hunter_runtime.py" not in modal_workflow
+        or "persist-credentials: false" not in modal_workflow
+        or "github.repository == 'ali00978/aet-hunter-public'" not in modal_workflow):
+    raise SystemExit("Modal deployment must deploy standalone public code only")
 
 print("Public development tree passes allowlist, secrets and owner-gate checks")

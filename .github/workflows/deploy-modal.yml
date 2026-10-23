@@ -1,12 +1,21 @@
-name: Deploy owner-controlled Modal scanner (never scan on GitHub)
+name: Deploy standalone PUBLIC Hunter to Modal (GitHub deploys only)
+
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-modal.yml'
+
 permissions:
   contents: read
+
 jobs:
   deploy:
+    if: >-
+      ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'deploy: standalone public Hunter') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -14,16 +23,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run local wrapper checks before deployment
+      - name: Run offline validation before deployment
         run: |
-          python -m py_compile ops/modal/hunter_modal.py ops/modal/legacy_bridge.py
-          python -m unittest -v test_modal_bridge.py
+          python public_guard.py
+          python -m unittest -v test_public_hunter_runtime.py
+          python -m py_compile ops/modal/public_hunter_modal.py public_hunter_runtime.py public_apify_collector.py hunter_feed.py hunter_pro_export.py hunter_pro_combined.py hunter_sync.py
       - name: Install Modal deployment client
         run: python -m pip install 'modal>=1.0,<2'
-      - name: Deploy to the private Modal workspace
+      - name: Deploy public Hunter (scan execution is external)
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
-          test -n "$MODAL_TOKEN_ID" && test -n "$MODAL_TOKEN_SECRET"
-          modal deploy ops/modal/hunter_modal.py
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "Modal deployment unavailable: MODAL_TOKEN_ID / MODAL_TOKEN_SECRET must be configured as GitHub Actions secrets."
+            exit 1
+          fi
+          modal deploy ops/modal/public_hunter_modal.py

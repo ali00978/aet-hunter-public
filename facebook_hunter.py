@@ -5,6 +5,7 @@ Facebook/API requests and cannot override quota or access restrictions.
 """
 import hashlib
 import json
+import os
 import math
 import re
 from datetime import datetime, timezone, timedelta
@@ -14,7 +15,7 @@ from car_triage import HIGH_RISK, PREFERRED
 from marktplaats_data import parse_mileage
 from facebook_vehicle_filter import is_vehicle_title, provider_photos
 
-ROOT=Path(__file__).resolve().parent
+ROOT=Path(os.environ.get("AET_HUNTER_STATE_DIR", Path(__file__).resolve().parent))
 SOURCES=(("apify_kandidaten.json","apify_status.json","Apify"),
          ("socialfetch_kandidaten.json","socialfetch_status.json","Social Fetch"))
 ID_RE=re.compile(r"^/marketplace/item/([0-9]+)/?$")
