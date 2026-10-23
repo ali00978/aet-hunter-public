@@ -9,7 +9,19 @@ from ops.github.public_actions_runner import main
 
 class PublicGithubRunnerTests(unittest.TestCase):
     def test_disabled_by_default(self):
-        with patch.dict(os.environ, {"AET_PUBLIC_HUNTER_ENABLED": "false"}):
+        with patch.dict(os.environ, {"AET_PUBLIC_HUNTER_ENABLED": "false",
+                                      "AET_GITHUB_TERMS_APPROVED": "true"}):
+            with patch("ops.modal.legacy_bridge.run_original_hunter") as run:
+                main()
+                run.assert_not_called()
+
+    def test_not_authorized_for_commercial_github_usage(self):
+        # A valid enabled flag alone is not enough to launch a live scan.
+        with patch.dict(os.environ, {
+                "AET_PUBLIC_HUNTER_ENABLED": "true",
+                "AET_GITHUB_TERMS_APPROVED": "false",
+                "GITHUB_REPOSITORY": "ali00978/aet-hunter-public",
+                "GITHUB_REF": "refs/heads/main"}, clear=True):
             with patch("ops.modal.legacy_bridge.run_original_hunter") as run:
                 main()
                 run.assert_not_called()
@@ -17,6 +29,8 @@ class PublicGithubRunnerTests(unittest.TestCase):
     def test_unknown_repo_refused(self):
         with patch.dict(os.environ, {
                 "AET_PUBLIC_HUNTER_ENABLED": "true",
+            "AET_GITHUB_TERMS_APPROVED": "true",
+                "AET_GITHUB_TERMS_APPROVED": "true",
                 "GITHUB_REPOSITORY": "another-user/fork",
                 "GITHUB_REF": "refs/heads/main"}):
             with self.assertRaisesRegex(RuntimeError, "unknown GitHub repository"):
@@ -65,6 +79,7 @@ class PublicGithubRunnerTests(unittest.TestCase):
         content = path.read_text(encoding="utf-8")
         self.assertIn("cron: '17 */2 * * *'", content)
         self.assertIn("vars.AET_PUBLIC_HUNTER_ENABLED == 'true'", content)
+        self.assertIn("vars.AET_GITHUB_TERMS_APPROVED == 'true'", content)
         self.assertIn("AET_GITHUB_TOKEN: ", content)
         self.assertIn("runs-on: ubuntu-latest", content)
         self.assertNotIn("  pull_request:", content)
