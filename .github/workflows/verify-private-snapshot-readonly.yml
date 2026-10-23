@@ -1,6 +1,10 @@
 name: Verify original Hunter saved state (read only)
 on:
   workflow_dispatch:
+  # One-time snapshot integrity audit; restore after this run.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-private-snapshot-readonly.yml']
 
 permissions:
   contents: read
