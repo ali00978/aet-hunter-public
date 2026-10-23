@@ -8,6 +8,58 @@ from ops.modal import legacy_bridge as bridge
 
 
 class BridgeTests(unittest.TestCase):
+    def test_scanner_never_inherits_provider_or_git_credentials(self):
+        env = {
+            "AET_GITHUB_TOKEN": "sample-github-secret",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+            "AET_HUNTER_SYNC_TOKEN": "sample-hunter-secret",
+            "APIFY_TOKEN": "sample-facebook-token",
+            "GIT_ASKPASS": "/tmp/private-askpass",
+            "MAX_BUY_PRICE": "3000",
+        }
+        for args in (["python", "scanner.py"],
+                     ["python", "-m", "unittest", "-q", "test_hunter.py"],
+                     ["python", "hunter_feed.py"]):
+            with self.subTest(args=args):
+                child = bridge.stage_environment(args, env)
+                self.assertEqual(child["MAX_BUY_PRICE"], "3000")
+                for name in ("AET_GITHUB_TOKEN", "AET_PRO_SYNC_URL",
+                             "AET_HUNTER_SYNC_TOKEN", "APIFY_TOKEN",
+                             "GIT_ASKPASS"):
+                    self.assertNotIn(name, child)
+
+    def test_git_only_receives_git_credentials(self):
+        env = {
+            "AET_GITHUB_TOKEN": "fake-private-github-secret",
+            "GIT_ASKPASS": "/tmp/private-askpass",
+            "APIFY_TOKEN": "no-facebook-leak",
+            "AET_HUNTER_SYNC_TOKEN": "no-sync-leak",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+        }
+        child = bridge.stage_environment(["git", "fetch", "origin", "main"], env)
+        self.assertEqual(child["AET_GITHUB_TOKEN"], env["AET_GITHUB_TOKEN"])
+        self.assertEqual(child["GIT_ASKPASS"], env["GIT_ASKPASS"])
+        self.assertNotIn("APIFY_TOKEN", child)
+        self.assertNotIn("AET_HUNTER_SYNC_TOKEN", child)
+
+    def test_facebook_and_sync_tokens_are_separated(self):
+        env = {
+            "AET_GITHUB_TOKEN": "private-github-token",
+            "APIFY_TOKEN": "private-apify-token",
+            "AET_HUNTER_SYNC_TOKEN": "private-sync-token",
+            "AET_PRO_SYNC_URL": "https://example.test/api/integrations/hunter/sync",
+        }
+        facebook = bridge.stage_environment(["python", "apify_test.py"], env)
+        self.assertEqual(facebook["APIFY_TOKEN"], env["APIFY_TOKEN"])
+        self.assertNotIn("AET_GITHUB_TOKEN", facebook)
+        self.assertNotIn("AET_HUNTER_SYNC_TOKEN", facebook)
+        sync = bridge.stage_environment(
+            ["python", "hunter_sync.py", "facebook-apify", "--send"], env)
+        self.assertEqual(sync["AET_HUNTER_SYNC_TOKEN"], env["AET_HUNTER_SYNC_TOKEN"])
+        self.assertEqual(sync["AET_PRO_SYNC_URL"], env["AET_PRO_SYNC_URL"])
+        self.assertNotIn("AET_GITHUB_TOKEN", sync)
+        self.assertNotIn("APIFY_TOKEN", sync)
+
     def test_disabled_by_default(self):
         with patch.object(bridge, "prepare_clone") as clone:
             bridge.run_original_hunter({"AET_MODAL_LIVE_ENABLED": "0"})
