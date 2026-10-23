@@ -10,7 +10,7 @@ state = modal.Volume.from_name("aet-cars-public-hunter-state", create_if_missing
 image = (modal.Image.debian_slim(python_version="3.12")
          .add_local_dir(".", remote_path="/root/aet-public",
                         ignore=[".git", ".github", "__pycache__", "*.json", "*.pyc"]))
-secret = modal.Secret.from_name("aet-hunter-runtime")
+secret = modal.Secret.from_name("aet-public-hunter-runtime")
 
 
 def _run(platform):
