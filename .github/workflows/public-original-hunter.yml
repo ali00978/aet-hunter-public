@@ -17,7 +17,8 @@ jobs:
     # the private integration credentials are securely configured.
     if: ${{ github.repository == 'ali00978/aet-hunter-public' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # Hard upper bound so a stuck scan never consumes unlimited shared compute.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
