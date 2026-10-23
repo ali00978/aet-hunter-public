@@ -26,6 +26,8 @@ ALLOW = {
     ".github/workflows/verify-aet-pro-handshake.yml",
     "ops/github/apify_actor_readiness.py", "test_apify_actor_readiness.py",
     ".github/workflows/verify-apify-actor-readiness.yml",
+    "ops/github/private_snapshot_preflight.py", "test_private_snapshot_preflight.py",
+    ".github/workflows/verify-private-snapshot-readonly.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
@@ -103,4 +105,17 @@ if ("  workflow_dispatch:" not in actor_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" in actor_workflow
         or "secrets.AET_GITHUB_TOKEN" in actor_workflow):
     raise SystemExit("Apify readiness workflow must run only manually and without real scans")
+state_workflow = Path(".github/workflows/verify-private-snapshot-readonly.yml").read_text(encoding="utf-8")
+if ("  workflow_dispatch:" not in state_workflow
+        or "  schedule:" in state_workflow
+        or "  pull_request:" in state_workflow
+        or "  push:" in state_workflow
+        or "github.repository == 'ali00978/aet-hunter-public'" not in state_workflow
+        or "github.ref == 'refs/heads/main'" not in state_workflow
+        or "persist-credentials: false" not in state_workflow
+        or "secrets.AET_GITHUB_TOKEN" not in state_workflow
+        or "ops/github/private_snapshot_preflight.py" not in state_workflow
+        or "secrets.APIFY_TOKEN" in state_workflow
+        or "secrets.AET_HUNTER_SYNC_TOKEN" in state_workflow):
+    raise SystemExit("Private snapshot check must be owner/main manual and read-only")
 print("Public development tree passes allowlist, secrets and owner-gate checks")
