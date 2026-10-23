@@ -1,0 +1,35 @@
+name: AET Hunter original scanner (public Actions runner)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aet-public-original-hunter
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    # Explicit repository-owner switch: scheduled runs stay disabled until
+    # the private integration credentials are securely configured.
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unchanged original private Marktplaats and Facebook Hunter
+        env:
+          AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
+          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: python ops/github/public_actions_runner.py
