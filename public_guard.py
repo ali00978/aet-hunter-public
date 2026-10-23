@@ -24,6 +24,8 @@ ALLOW = {
     ".github/workflows/verify-github-apify-readonly.yml",
     "ops/github/aet_pro_handshake.py", "test_aet_pro_handshake.py",
     ".github/workflows/verify-aet-pro-handshake.yml",
+    "ops/github/apify_actor_readiness.py", "test_apify_actor_readiness.py",
+    ".github/workflows/verify-apify-actor-readiness.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
@@ -89,4 +91,16 @@ if ("  workflow_dispatch:" not in aet_pro_handshake_workflow
         or "secrets.AET_GITHUB_TOKEN" in aet_pro_handshake_workflow
         or "secrets.APIFY_TOKEN" in aet_pro_handshake_workflow):
     raise SystemExit("Manual AET Pro handshake must be owner-only and contain no live scanner actions")
+actor_workflow = Path(".github/workflows/verify-apify-actor-readiness.yml").read_text(encoding="utf-8")
+if ("  workflow_dispatch:" not in actor_workflow
+        or "  schedule:" in actor_workflow
+        or "  pull_request:" in actor_workflow
+        or "github.repository == 'ali00978/aet-hunter-public'" not in actor_workflow
+        or "github.ref == 'refs/heads/main'" not in actor_workflow
+        or "persist-credentials: false" not in actor_workflow
+        or "ops/github/apify_actor_readiness.py" not in actor_workflow
+        or "secrets.APIFY_TOKEN" not in actor_workflow
+        or "secrets.AET_HUNTER_SYNC_TOKEN" in actor_workflow
+        or "secrets.AET_GITHUB_TOKEN" in actor_workflow):
+    raise SystemExit("Apify readiness workflow must run only manually and without real scans")
 print("Public development tree passes allowlist, secrets and owner-gate checks")

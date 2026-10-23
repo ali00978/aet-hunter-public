@@ -96,6 +96,33 @@ proof that a genuine AET Pro candidate batch would import successfully.
 On any unexpected HTTP status (including 200), stop and inspect the Worker
 before sending any further payload. No scanner is started by this workflow.
 
+## Manual Apify Facebook Actor and spending-limit check
+
+The standalone `.github/workflows/verify-apify-actor-readiness.yml`
+is a manual, owner/main-only, GET-only check. It uses the already stored
+`APIFY_TOKEN` to read exactly two Apify API endpoints:
+
+- `GET /v2/actors/hydedata~facebook-marketplace-scraper` for the Actor
+  referenced by the unchanged private Facebook workflow.
+- `GET /v2/users/me/limits` for monthly USD cap and current usage.
+
+No Actor is started, no Facebook Marketplace listings are fetched and no
+billing operation is invoked. It checks the public Actor identity and verifies
+that account usage is **below 90%** of the currently reported monthly USD
+spend limit. An exhausted/unknown budget fails closed. HTTP statuses and
+coarse result labels are printed publicly; credentials, usernames, exact
+spending amounts, API JSON and customer listings are NEVER logged. Redirects
+are blocked to avoid cross-host token forwarding.
+
+A green result establishes **Actor metadata availability and monthly account
+usage headroom at the moment checked**, not permission or budget for a new
+Actor run. Do not infer that additional commercial scanning is free or that
+GitHub hosted scheduled runs are approved. The original Facebook code
+additionally enforces a hard cap of **100 provider requests per month**; the
+current desired two-hour frequency would reach that cap long before the
+month ends. Adapt scheduling responsibly and review the Actor's live pricing
+before activating anything.
+
 ## Limitations and risks
 
 - No external host is required, but public Actions runs are visible to anyone.
