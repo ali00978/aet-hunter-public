@@ -44,7 +44,7 @@ class PrivatePrOfflineValidationTests(unittest.TestCase):
             if len(calls) == 1:
                 return subprocess.CompletedProcess(args[0], 0)
             return subprocess.CompletedProcess(
-                args[0], 0, stdout="Private OFFLINE tests: 185 failures: 0 errors: 0 skipped: 0\\n")
+                args[0], 0, stdout="Private OFFLINE tests: 185 failures: 0 errors: 0 skipped: 0\n")
         env = {"GITHUB_REPOSITORY": job.OWNER,
                "GITHUB_REF": "refs/heads/main",
                "AET_GITHUB_TOKEN": "TOKEN_MUST_NEVER_BE_PRINTED",
@@ -69,7 +69,7 @@ class PrivatePrOfflineValidationTests(unittest.TestCase):
             if args[0][0] == "git":
                 return subprocess.CompletedProcess(args[0], 0)
             return subprocess.CompletedProcess(
-                args[0], 1, stdout="Private OFFLINE tests: 180 failures: 1 errors: 0 skipped: 0\\n")
+                args[0], 1, stdout="Private OFFLINE tests: 180 failures: 1 errors: 0 skipped: 0\n")
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": job.OWNER,
                                       "GITHUB_REF": "refs/heads/main",
                                       "AET_GITHUB_TOKEN": "FAKE_TOKEN"}, clear=True), \
