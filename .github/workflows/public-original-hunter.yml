@@ -15,7 +15,7 @@ jobs:
   scan:
     # Explicit repository-owner switch: scheduled runs stay disabled until
     # the private integration credentials are securely configured.
-    if: ${{ github.repository == 'ali00978/aet-hunter-public' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' }}
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && vars.AET_PUBLIC_HUNTER_ENABLED == 'true' && vars.AET_GITHUB_TERMS_APPROVED == 'true' }}
     runs-on: ubuntu-latest
     # Hard upper bound so a stuck scan never consumes unlimited shared compute.
     timeout-minutes: 30
@@ -29,6 +29,7 @@ jobs:
       - name: Run unchanged original private Marktplaats and Facebook Hunter
         env:
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
+          AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
           AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
           AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
           AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
