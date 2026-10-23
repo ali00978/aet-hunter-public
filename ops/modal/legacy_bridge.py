@@ -1,7 +1,6 @@
 """Run the ORIGINAL private Hunter with a different, authorized executor.
 
-Never call this from public GitHub Actions. Live scans execute only inside the
-owner's private Modal runtime, using Modal Secrets for credentials.
+Never call this from public GitHub Actions. Live scans run only in an owner-authorized environment. Never print secrets.
 """
 from __future__ import annotations
 
@@ -11,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPOSITORY = "https://github.com/ali00978/aet-cars-ai-hunter.git"
 MP_STATE = (
@@ -46,8 +46,17 @@ def verify_credentials(env: dict[str, str]) -> None:
     missing = [name for name in NEEDED if not env.get(name, "").strip()]
     if missing:
         raise RuntimeError("Missing required Modal Secret names: " + ", ".join(missing))
-    if not env["AET_PRO_SYNC_URL"].startswith("https://"):
-        raise RuntimeError("AET_PRO_SYNC_URL must be HTTPS")
+    try:
+        target = urlsplit(env["AET_PRO_SYNC_URL"])
+        port_ok = target.port in (None, 443)
+    except ValueError:
+        port_ok = False
+        target = None
+    if (target is None or target.scheme != "https" or not target.hostname
+            or target.username or target.password or target.query
+            or target.fragment or not port_ok
+            or target.path != "/api/integrations/hunter/sync"):
+        raise RuntimeError("AET_PRO_SYNC_URL must be a valid HTTPS Hunter sync endpoint")
     if len(env["AET_HUNTER_SYNC_TOKEN"]) < 24:
         raise RuntimeError("AET_HUNTER_SYNC_TOKEN is too short")
 
