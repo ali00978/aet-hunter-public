@@ -51,7 +51,7 @@ def run_scanner_with_progress(scan, interval_seconds=120, emit=None):
     """
     if emit is None:
         def emit(message):
-            os.write(1, (message + "\\n").encode("utf-8"))
+            os.write(1, (message + "\n").encode("utf-8"))
     if not isinstance(interval_seconds, (int, float)) or interval_seconds <= 0:
         raise ValueError("Invalid heartbeat interval")
     stop = threading.Event()
