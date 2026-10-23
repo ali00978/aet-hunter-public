@@ -71,6 +71,31 @@ sync secret, or whether actual live scans will succeed. Those steps need
 separate authorized checks. Never treat this green test as approval to
 activate the commercial scheduled hosted runner.
 
+## Manual AET Pro Cloudflare token handshake (no legitimate vehicle payload)
+
+Before enabling *any* genuine scan, a separate manually dispatched
+`.github/workflows/verify-aet-pro-handshake.yml` checks the newly rotated
+`AET_HUNTER_SYNC_TOKEN` in Cloudflare. Only `main` in the public owner repo
+may execute it.
+
+The production sync endpoint receives the **intentionally invalid** JSON
+`{"schema":"invalid-intentional-auth-check"}`:
+
+- With the configured `X-Hunter-Token`, a correctly implemented production
+  Worker should reject the invalid schema with **HTTP 422**.
+- Without the token, the same invalid JSON must be rejected with **401/403**.
+
+The test uses a fixed allowed HTTPS Worker host and route, prevents redirects,
+prints only HTTP codes, and never attempts a legitimate Hunter sync payload.
+It is designed not to import any vehicles or change existing records because
+the invalid schema is rejected. The Cloudflare endpoint implementation is not
+available for exhaustive inspection here, so actual authorization behavior
+must still be verified from the result. Do **not** mistake a green test for
+proof that a genuine AET Pro candidate batch would import successfully.
+
+On any unexpected HTTP status (including 200), stop and inspect the Worker
+before sending any further payload. No scanner is started by this workflow.
+
 ## Limitations and risks
 
 - No external host is required, but public Actions runs are visible to anyone.
