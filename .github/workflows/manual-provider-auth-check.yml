@@ -1,0 +1,28 @@
+name: Hunter provider authentication check (read-only)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify original PRIVATE GitHub source read access
+        env:
+          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+        run: python ops/github/provider_auth_probe.py github
+      - name: Verify Apify account read access (no Actor execution)
+        if: ${{ always() }}
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: python ops/github/provider_auth_probe.py apify
