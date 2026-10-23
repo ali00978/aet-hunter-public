@@ -247,6 +247,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertLessEqual(62 * run, monthly)
         self.assertEqual(apify.bounded_budget({}), (4.00, 0.06))
         self.assertEqual(apify.MAX_ITEMS_PER_RUN, 80)
+        self.assertEqual(apify.ONE_TIME_RETRY_FILE, "apify_retry_once.json")
         self.assertEqual(apify.MAX_MONTHLY_STARTS, 70)
 
     def test_free_account_credit_gate_is_read_only_and_fail_closed(self):

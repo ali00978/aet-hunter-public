@@ -27,6 +27,7 @@ FREE_MONTHLY_CREDIT_USD = 5.00
 LOCAL_MONTHLY_RESERVE_USD = 4.00
 DEFAULT_MAX_RUN_USD = 0.06
 COOLDOWN_FILE = "apify_backoff.json"
+ONE_TIME_RETRY_FILE = "apify_retry_once.json"
 ACCOUNT_LIMITS = "https://api.apify.com/v2/users/me/limits"
 ACCOUNT_PLAN = "https://api.apify.com/v2/users/me"
 
@@ -164,6 +165,61 @@ def active_backoff(root, now):
     return now < until
 
 
+def permitted_nonrestrictive_retry(root, env, now):
+    """Allow one explicit corrected-input test, never lift an HTTP restriction.
+
+    A failed input (HTTP 400) previously wrote a generic 2-hour
+    provider_unavailable backoff. Only the owner one-shot test may override
+    THAT state. Network restrictions and 24-hour restricted backoffs remain
+    intact. The marker is encrypted and durable before the new provider POST.
+    """
+    if not (env.get("AET_ONE_TIME_FACEBOOK_RETRY") == "I_ACCEPT_ONE_CORRECTED_INPUT_TEST"
+            and env.get("GITHUB_REPOSITORY") == "ali00978/aet-hunter-public"
+            and env.get("GITHUB_REF") == "refs/heads/main"
+            and env.get("GITHUB_EVENT_NAME") == "push"
+            and env.get("GITHUB_RUN_ATTEMPT") == "1"
+            and env.get("GITHUB_WORKFLOW") ==
+                    "AET Facebook one-time live integration to AET Pro"):
+        return False
+    if (Path(root) / ONE_TIME_RETRY_FILE).exists():
+        return False
+    path = Path(root) / COOLDOWN_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if (not isinstance(data, dict)
+                or data.get("reason") != "provider_unavailable"):
+            return False
+        moment = datetime.fromisoformat(data["until"].replace("Z", "+00:00"))
+        if moment.tzinfo is None:
+            return False
+        return now < moment
+    except (OSError, ValueError, AttributeError, TypeError, KeyError):
+        return False
+
+
+def describe_provider_http_error(error):
+    """Small allowlist of Apify machine error types; no raw error bodies."""
+    try:
+        blob = error.read(8193)
+        if len(blob) > 8192:
+            return None
+        parsed = json.loads(blob.decode("utf-8"))
+        item = parsed.get("error") if isinstance(parsed, dict) else None
+        code = item.get("type") if isinstance(item, dict) else None
+        allowed = {
+            "invalid-input", "invalid-input-schema", "invalid-parameter",
+            "max-total-charge-usd-below-minimum",
+            "actor-run-failed", "actor-is-not-rented",
+            "actor-can-not-be-rented", "actor-disabled",
+            "apify-plan-required-to-use-paid-actor",
+            "not-enough-usage-to-run-paid-actor",
+            "limit-reached", "too-many-requests",
+        }
+        return code if isinstance(code, str) and code in allowed else None
+    except (OSError, ValueError, UnicodeError, TypeError):
+        return None
+
+
 def set_backoff(root, now, http_code=None):
     from datetime import timedelta
     hours = 24 if http_code in (401, 402, 403, 429) else 2
@@ -212,7 +268,9 @@ def fetch_actor(token, cap, opener=None):
                        "maxTotalChargeUsd": str(cap)})
     payload = {"searchQueries": [], "location": "Dronten, Netherlands",
                "categories": ["vehicles"], "maxItemsPerSearch": MAX_ITEMS_PER_RUN,
-               "vehiclesOnly": True, "addListingDetails": False}
+               "vehiclesOnly": True, "includeDetails": False,
+               "excludeDownPaymentAds": True, "minPrice": 350,
+               "maxPrice": 3000, "sortNewestFirst": True}
     request = Request(BASE + "?" + query, method="POST",
                       data=json.dumps(payload).encode("utf-8"),
                       headers={"Authorization": "Bearer " + token.strip(),
@@ -245,14 +303,18 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
     status = {"checked_at": now.isoformat(), "status": "preflight_failed",
               "provider": "Apify HydeData"}
 
-    # Read-only account validation and existing cooldown BEFORE reserving
-    # a paid call. If the GET fails, an Actor must NOT be started.
+    # The one-off exception applies ONLY to a prior 2-hour input/network
+    # cooldown. It never bypasses a recorded HTTP account restriction.
+    retry_exception = False
     try:
         if active_backoff(root, now):
-            status["status"] = "provider_cooldown"
-            atomic_json(root / "apify_status.json", status)
-            persist()
-            return status
+            if permitted_nonrestrictive_retry(root, env, now):
+                retry_exception = True
+            else:
+                status["status"] = "provider_cooldown"
+                atomic_json(root / "apify_status.json", status)
+                persist()
+                return status
         if account_check is None:
             verify_free_headroom(token, cap)
         else:
@@ -280,6 +342,13 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
         persist()
         return status
 
+    if retry_exception:
+        # Must be durable before the potentially billable request begins:
+        # no second exception, even on timeout or process termination.
+        atomic_json(root / ONE_TIME_RETRY_FILE,
+                    {"used_at": now.isoformat(),
+                     "reason": "one_corrected_input_test"})
+        persist()
     status["status"] = "request_failed"
     try:
         rows = request_fn(token, cap) if request_fn else fetch_actor(token, cap)
@@ -350,6 +419,9 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
                 status["status"] = "no_vehicle_candidates"
     except HTTPError as error:
         status.update({"status": "http_error", "http_status": error.code})
+        safe_type = describe_provider_http_error(error)
+        if safe_type is not None:
+            status["provider_error_type"] = safe_type
         set_backoff(root, now, http_code=error.code)
     except (URLError, OSError, ValueError, TimeoutError, TypeError) as error:
         status.update({"status": "request_failed", "error_type": type(error).__name__})

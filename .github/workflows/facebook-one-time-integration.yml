@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
 
+# Single explicit corrected-input exception for prior 2-hour failure only.
+# A true 403/429 account restriction is never bypassed.
 # Apify POST query: maxItems (not maxPaidDatasetItems); price cap remains $0.06.
 # Corrected request option verified in Apify's API documentation and offline CI.
 # Validate included/prepaid Apify credits separately from billing limit.
@@ -62,6 +64,7 @@ jobs:
         id: test
         env:
           AET_ONE_TIME_FACEBOOK_TEST: I_REQUESTED_ONE_TEST
+          AET_ONE_TIME_FACEBOOK_RETRY: I_ACCEPT_ONE_CORRECTED_INPUT_TEST
           AET_FACEBOOK_ENABLED: 'true'
           AET_APIFY_MONTHLY_BUDGET_USD: '4.00'
           AET_APIFY_MAX_CHARGE_USD: '0.06'

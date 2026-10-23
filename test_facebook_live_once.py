@@ -16,6 +16,7 @@ SAFE_ENV = {
     "GITHUB_RUN_ATTEMPT": "1",
     "GITHUB_WORKFLOW": once.WORKFLOW,
     "AET_ONE_TIME_FACEBOOK_TEST": "I_REQUESTED_ONE_TEST",
+    "AET_ONE_TIME_FACEBOOK_RETRY": "I_ACCEPT_ONE_CORRECTED_INPUT_TEST",
     "AET_FACEBOOK_ENABLED": "true",
     "APIFY_TOKEN": "synthetic-no-real-apify-token",
     "AET_PRO_SYNC_URL": "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
@@ -33,6 +34,7 @@ class FacebookLiveOnceTests(unittest.TestCase):
             ("GITHUB_WORKFLOW", "not authorized"),
             ("AET_ONE_TIME_FACEBOOK_TEST", ""),
             ("AET_FACEBOOK_ENABLED", "false"),
+            ("AET_ONE_TIME_FACEBOOK_RETRY", ""),
         ]:
             with self.subTest(key=key), self.assertRaises(PermissionError):
                 once.check_owner({**SAFE_ENV, key: val})
@@ -76,6 +78,58 @@ class FacebookLiveOnceTests(unittest.TestCase):
             after = secure.unseal(target.read_bytes(), TOKEN)["files"]
             self.assertEqual(after["apify_budget.json"]["calls"], 4)
             self.assertEqual(after["apify_status.json"]["accepted"], 3)
+
+    def test_corrected_input_exception_is_single_use_and_never_bypasses_429(self):
+        from datetime import datetime, timedelta, timezone
+        import public_apify_collector as apify
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            env = dict(SAFE_ENV)
+            apify.atomic_json(Path(folder) / apify.COOLDOWN_FILE, {
+                "until": (now + timedelta(hours=1)).isoformat(),
+                "reason": "provider_unavailable",
+            })
+            self.assertTrue(apify.permitted_nonrestrictive_retry(folder, env, now))
+            apify.atomic_json(Path(folder) / apify.ONE_TIME_RETRY_FILE, {
+                "reason": "one_corrected_input_test"})
+            self.assertFalse(apify.permitted_nonrestrictive_retry(folder, env, now))
+            (Path(folder) / apify.ONE_TIME_RETRY_FILE).unlink()
+            apify.atomic_json(Path(folder) / apify.COOLDOWN_FILE, {
+                "until": (now + timedelta(hours=24)).isoformat(),
+                "reason": "http_restricted",
+            })
+            self.assertFalse(apify.permitted_nonrestrictive_retry(folder, env, now))
+            env["GITHUB_RUN_ATTEMPT"] = "2"
+            self.assertFalse(apify.permitted_nonrestrictive_retry(folder, env, now))
+
+    def test_corrected_input_exception_is_reserved_before_provider_POST(self):
+        from datetime import datetime, timedelta, timezone
+        import public_apify_collector as apify
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            apify.atomic_json(path / apify.COOLDOWN_FILE, {
+                "until": (now + timedelta(hours=1)).isoformat(),
+                "reason": "provider_unavailable",
+            })
+            calls = []
+            def fake_actor(token, cap):
+                calls.append(True)
+                self.assertTrue((path / apify.ONE_TIME_RETRY_FILE).exists())
+                self.assertEqual(json.loads((path / "apify_budget.json").read_text())["calls"], 1)
+                return [{"url": "https://www.facebook.com/marketplace/item/776655/",
+                         "title": "Toyota Aygo 2013", "price": 1250,
+                         "listedAt": now.isoformat()}]
+            status = apify.collect(folder, SAFE_ENV, lambda: None,
+                                   request_fn=fake_actor, now=now,
+                                   account_check=lambda token, cap: True)
+            self.assertEqual(status["status"], "ok")
+            self.assertEqual(len(calls), 1)
+            repeat = apify.collect(folder, SAFE_ENV, lambda: None,
+                                   request_fn=fake_actor, now=now,
+                                   account_check=lambda token, cap: True)
+            self.assertEqual(repeat["status"], "provider_cooldown")
+            self.assertEqual(len(calls), 1)
 
     def test_failure_keeps_reserved_budget_encrypted(self):
         with tempfile.TemporaryDirectory() as d:

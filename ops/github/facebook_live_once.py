@@ -36,6 +36,8 @@ def check_owner(env):
         raise ValueError("Apify secret not configured")
     if env.get("AET_FACEBOOK_ENABLED") != "true":
         raise PermissionError("Facebook one-off test must be explicitly enabled")
+    if env.get("AET_ONE_TIME_FACEBOOK_RETRY") != "I_ACCEPT_ONE_CORRECTED_INPUT_TEST":
+        raise PermissionError("Explicit one-time corrected-input exception missing")
     from public_apify_collector import bounded_budget
     test_env = dict(env)
     test_env["AET_APIFY_MONTHLY_BUDGET_USD"] = str(MONTH_CAP)
@@ -68,6 +70,16 @@ def describe(root):
     )
     if status.get("preflight_reason") in allowed_reason:
         print("Facebook safety gate: " + status["preflight_reason"])
+    safe_provider_types = {
+        "invalid-input", "invalid-input-schema", "invalid-parameter",
+        "max-total-charge-usd-below-minimum", "actor-run-failed",
+        "actor-is-not-rented", "actor-can-not-be-rented", "actor-disabled",
+        "apify-plan-required-to-use-paid-actor",
+        "not-enough-usage-to-run-paid-actor", "limit-reached",
+        "too-many-requests",
+    }
+    if status.get("provider_error_type") in safe_provider_types:
+        print("Facebook provider error type: " + status["provider_error_type"])
     for name in ("received", "accepted", "new_candidates", "http_status"):
         value = status.get(name)
         if type(value) is int and 0 <= value <= 1000000:

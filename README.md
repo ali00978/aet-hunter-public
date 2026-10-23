@@ -35,6 +35,12 @@ HTTP-429-cooldowns en geldige oude resultaten blijven beschermd.
 De gepubliceerde Actor-prijs is een vanafprijs, geen
 gegarandeerde maandkost.
 
+**Eenmalige hersteluitzondering (23 oktober 2026):** één poging mag
+alleen de eerdere generieke twee-uurscooldown na HTTP 400 negeren.
+Een 401/403/429-accountbeperking blijft van kracht. De uitzondering wordt
+vóór het nieuwe Actor-verzoek versleuteld vastgelegd en is maar één keer
+bruikbaar, met het bestaande limiet van $0,06.
+
 **Eenmalige ontwikkeltest:** `.github/workflows/facebook-one-time-integration.yml`
 is geen terugkerende scraper. Alleen de expliciete test-commit kan één
 Facebook Actor-start van maximaal $0,06 proberen met opgeslagen,
