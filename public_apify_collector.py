@@ -208,7 +208,7 @@ def fetch_actor(token, cap, opener=None):
     if not isinstance(token, str) or len(token.strip()) < 15:
         raise ValueError("Missing Apify token")
     query = urlencode({"timeout": 90, "memory": 256,
-                       "maxPaidDatasetItems": MAX_ITEMS_PER_RUN,
+                       "maxItems": MAX_ITEMS_PER_RUN,
                        "maxTotalChargeUsd": str(cap)})
     payload = {"searchQueries": [], "location": "Dronten, Netherlands",
                "categories": ["vehicles"], "maxItemsPerSearch": MAX_ITEMS_PER_RUN,
