@@ -27,6 +27,14 @@ mogen onversleutelde advertenties, identificeerbare data of credentials er
 **nooit** in. Het automatisch hergebruiken van de cache is niet gegarandeerd;
 bij een ontbrekende cache stoppen geplande runs tot een bewuste herstelactie.
 
+**Apify Free-optimalisatie:** maximaal 80 Facebook-listings per scan,
+maximaal 2 geplande starts per dag, en een harde limiet van $0,06
+per Actor-start en $4 per kalendermaand. De Actor start alleen met
+voldoende geverifieerd Free-tegoed, op expliciete activering;
+HTTP-429-cooldowns en geldige oude resultaten blijven beschermd.
+De gepubliceerde Actor-prijs is een vanafprijs, geen
+gegarandeerde maandkost.
+
 **Plan B:** Modal met privé-volume staat voorbereid in
 `ops/modal/public_hunter_modal.py`. Een externe host is niet verplicht voor
 de developmenttests. De oude privé-repository, privé-Actions en haar opgeslagen

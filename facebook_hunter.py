@@ -31,16 +31,14 @@ def when(value):
         return dt if dt.tzinfo else None
     except (ValueError,OverflowError):return None
 def money(value):
-    if isinstance(value,dict):value=value.get("amount")
-    if isinstance(value,bool):return None
-    if isinstance(value,(int,float)):
-        return int(value) if math.isfinite(value) and 350<=value<=3000 else None
-    if isinstance(value,str):
-        value=re.sub(r"[^0-9]","",value)
-        try: num=int(value)
-        except ValueError:return None
-        return num if 350<=num<=3000 else None
-    return None
+    """Apply the same Dutch-price parser used by Marktplaats research."""
+    if isinstance(value, dict):
+        value = value.get("amount", value.get("value"))
+    from scanner import parse_price_eur
+    amount = parse_price_eur(value)
+    if amount is None or not 350 <= amount <= 3000:
+        return None
+    return round(amount, 2)
 def normalize(raw,source,now,provider_at=None):
     if not isinstance(raw,dict):return None
     url=raw.get("url")

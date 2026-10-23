@@ -89,8 +89,8 @@ jobs:
           AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
           AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
           AET_FACEBOOK_ENABLED: ${{ vars.AET_FACEBOOK_ENABLED }}
-          AET_APIFY_MONTHLY_BUDGET_USD: ${{ vars.AET_APIFY_MONTHLY_BUDGET_USD }}
-          AET_APIFY_MAX_CHARGE_USD: ${{ vars.AET_APIFY_MAX_CHARGE_USD }}
+          AET_APIFY_MONTHLY_BUDGET_USD: ${{ vars.AET_APIFY_MONTHLY_BUDGET_USD || '4.00' }}
+          AET_APIFY_MAX_CHARGE_USD: ${{ vars.AET_APIFY_MAX_CHARGE_USD || '0.06' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF: ${{ github.ref }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}

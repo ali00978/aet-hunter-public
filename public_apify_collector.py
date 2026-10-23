@@ -1,7 +1,9 @@
-"""Capped independent Apify collector; data lives in a private Modal Volume.
+"""Free-credit bounded Apify provider used by the standalone Hunter.
 
-Do not call this on public GitHub Actions. No token, raw listing or provider
-response is written to GitHub or public logs.
+Never print a provider token, listing or raw response. One provider POST per
+scheduled invocation; billable calls have a strict reservation, a remote
+account-headroom check, and persisted cooldowns. A caller must durably store
+the budget before the first POST.
 """
 from __future__ import annotations
 
@@ -17,7 +19,15 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 ACTOR = "hydedata~facebook-marketplace-scraper"
 BASE = "https://api.apify.com/v2/acts/" + ACTOR + "/run-sync-get-dataset-items"
-MAX_MONTHLY_STARTS = 100
+# 2 scheduled runs/day = 62 starts in a 31-day month, with room for
+# eight authorized manual checks. These are safety limits, not entitlements.
+MAX_MONTHLY_STARTS = 70
+MAX_ITEMS_PER_RUN = 80
+FREE_MONTHLY_CREDIT_USD = 5.00
+LOCAL_MONTHLY_RESERVE_USD = 4.00
+DEFAULT_MAX_RUN_USD = 0.06
+COOLDOWN_FILE = "apify_backoff.json"
+ACCOUNT_LIMITS = "https://api.apify.com/v2/users/me/limits"
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -43,20 +53,95 @@ def atomic_json(path, obj):
 
 
 def bounded_budget(env):
-    """Explicit opt-in monetary budget. No implicit pay-as-you-go spending."""
+    """Keep provider calls within free credits even if old variables are high.
+
+    Explicit AET_FACEBOOK_ENABLED=true is still required to initiate a request.
+    A limit here is a *reserved worst case*, not a guaranteed Actor price.
+    """
     def money(key, default):
+        raw = env.get(key, "")
+        if raw is None or raw == "":
+            raw = default
         try:
-            raw = float(env.get(key, str(default)))
+            value = float(raw)
         except (ValueError, TypeError, OverflowError):
             raise ValueError("Invalid Apify budget configuration") from None
-        if not math.isfinite(raw):
-            raise ValueError("Non-finite Apify budget")
-        return raw
-    monthly = money("AET_APIFY_MONTHLY_BUDGET_USD", 0)
-    per_run = money("AET_APIFY_MAX_CHARGE_USD", 0.10)
-    if not 0 < monthly <= 100 or not 0 < per_run <= 0.50:
-        raise ValueError("Apify budget needs positive approved limits")
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("Invalid Apify budget configuration")
+        return value
+    monthly = min(money("AET_APIFY_MONTHLY_BUDGET_USD", LOCAL_MONTHLY_RESERVE_USD),
+                  LOCAL_MONTHLY_RESERVE_USD)
+    per_run = min(money("AET_APIFY_MAX_CHARGE_USD", DEFAULT_MAX_RUN_USD),
+                  DEFAULT_MAX_RUN_USD)
+    # Stop rather than silently round a tiny positive budget down to zero.
+    if round(monthly, 2) <= 0 or round(per_run, 2) <= 0:
+        raise ValueError("Apify budget too small to safely reserve")
     return round(monthly, 2), round(per_run, 2)
+
+
+def verify_free_headroom(token, cap, opener=None):
+    """One FREE GET; never start a paid Actor if account credit is uncertain."""
+    if not isinstance(token, str) or len(token.strip()) < 15:
+        raise ValueError("Missing Apify token")
+    request = Request(ACCOUNT_LIMITS, method="GET", headers={
+        "Authorization": "Bearer " + token.strip(),
+        "Accept": "application/json",
+        "User-Agent": "AET-Hunter-Free-Budget-Guard/1",
+    })
+    opener = opener or build_opener(NoRedirect())
+    try:
+        with opener.open(request, timeout=12) as response:
+            raw = response.read(60001)
+            if response.status != 200 or len(raw) > 60000:
+                raise ValueError("Apify free-credit balance unavailable")
+        obj = json.loads(raw.decode("utf-8"))
+        info = obj.get("data") if isinstance(obj, dict) else None
+        limits = info.get("limits") if isinstance(info, dict) else None
+        current = info.get("current") if isinstance(info, dict) else None
+        maximum = limits.get("maxMonthlyUsageUsd") if isinstance(limits, dict) else None
+        spent = current.get("monthlyUsageUsd") if isinstance(current, dict) else None
+        if (type(maximum) not in (int, float) or type(spent) not in (int, float)
+                or not math.isfinite(maximum) or not math.isfinite(spent)
+                or spent < 0 or maximum <= 0
+                or maximum > FREE_MONTHLY_CREDIT_USD + .01):
+            raise ValueError("Free Apify plan could not be verified")
+        # Leave at least one dollar outside this Hunter's own reservation
+        # and at least half a dollar on the Apify account for other usage.
+        if (spent >= LOCAL_MONTHLY_RESERVE_USD or
+                spent + cap + 0.50 > maximum + 1e-8):
+            raise ValueError("Insufficient remaining free Apify credits")
+    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError,
+            TypeError, KeyError, json.JSONDecodeError) as error:
+        raise ValueError("Apify free-credit check failed; no Actor started") from error
+    return True
+
+
+def active_backoff(root, now):
+    path = Path(root) / COOLDOWN_FILE
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        raise ValueError("Corrupt Apify cooldown state; refusing provider request") from None
+    if not isinstance(obj, dict):
+        raise ValueError("Invalid Apify cooldown state")
+    try:
+        until = datetime.fromisoformat(obj["until"].replace("Z", "+00:00"))
+        if until.tzinfo is None:
+            raise ValueError("Timezone missing")
+    except (ValueError, KeyError, AttributeError, TypeError):
+        raise ValueError("Invalid Apify cooldown date") from None
+    return now < until
+
+
+def set_backoff(root, now, http_code=None):
+    from datetime import timedelta
+    hours = 24 if http_code in (401, 402, 403, 429) else 2
+    atomic_json(Path(root) / COOLDOWN_FILE,
+                {"until": (now + timedelta(hours=hours)).isoformat(),
+                 "reason": "http_restricted" if http_code in (401, 402, 403, 429)
+                 else "provider_unavailable"})
 
 
 def reserve(root, env, persist, now=None):
@@ -93,10 +178,11 @@ def fetch_actor(token, cap, opener=None):
     """One bounded POST. A timeout may have started a billable Actor."""
     if not isinstance(token, str) or len(token.strip()) < 15:
         raise ValueError("Missing Apify token")
-    query = urlencode({"timeout": 90, "memory": 256, "maxItems": 30,
+    query = urlencode({"timeout": 90, "memory": 256,
+                       "maxPaidDatasetItems": MAX_ITEMS_PER_RUN,
                        "maxTotalChargeUsd": str(cap)})
     payload = {"searchQueries": [], "location": "Dronten, Netherlands",
-               "categories": ["vehicles"], "maxItemsPerSearch": 30,
+               "categories": ["vehicles"], "maxItemsPerSearch": MAX_ITEMS_PER_RUN,
                "vehiclesOnly": True, "addListingDetails": False}
     request = Request(BASE + "?" + query, method="POST",
                       data=json.dumps(payload).encode("utf-8"),
@@ -113,11 +199,11 @@ def fetch_actor(token, cap, opener=None):
     data = json.loads(raw.decode("utf-8"))
     if not isinstance(data, list):
         raise ValueError("Provider returned non-list dataset")
-    return data[:150]
+    return data[:MAX_ITEMS_PER_RUN]
 
 
-def collect(root, env, persist, request_fn=None, now=None):
-    """Return aggregate status; retain only filtered vehicle data privately."""
+def collect(root, env, persist, request_fn=None, now=None, account_check=None):
+    """Fail closed without losing good history or resetting charge counters."""
     import facebook_hunter
     now = now or datetime.now(timezone.utc)
     root = Path(root)
@@ -126,51 +212,102 @@ def collect(root, env, persist, request_fn=None, now=None):
     token = env.get("APIFY_TOKEN", "")
     if len(token.strip()) < 15:
         raise ValueError("Missing Apify credential")
-    # Check spending configuration before allocating a chargeable reservation.
-    bounded_budget(env)
-    cap = reserve(root, env, persist, now=now)
-    status = {"checked_at": now.isoformat(), "status": "request_failed",
+    monthly, cap = bounded_budget(env)
+    status = {"checked_at": now.isoformat(), "status": "preflight_failed",
               "provider": "Apify HydeData"}
+
+    # Read-only account validation and existing cooldown BEFORE reserving
+    # a paid call. If the GET fails, an Actor must NOT be started.
+    try:
+        if active_backoff(root, now):
+            status["status"] = "provider_cooldown"
+            atomic_json(root / "apify_status.json", status)
+            persist()
+            return status
+        if account_check is None:
+            verify_free_headroom(token, cap)
+        else:
+            account_check(token, cap)
+    except ValueError:
+        atomic_json(root / "apify_status.json", status)
+        persist()
+        return status
+
+    try:
+        reserve(root, env, persist, now=now)
+    except ValueError:
+        status["status"] = "budget_cap_reached"
+        atomic_json(root / "apify_status.json", status)
+        persist()
+        return status
+
+    status["status"] = "request_failed"
     try:
         rows = request_fn(token, cap) if request_fn else fetch_actor(token, cap)
-        history_path = root / "apify_seen.json"
-        try:
-            history = json.loads(history_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            history = {}
-        except (OSError, ValueError):
-            raise ValueError("Invalid Facebook history; preserving provider call budget") from None
-        if not isinstance(history, dict):
-            raise ValueError("Invalid Facebook history structure")
-        accepted = {}
-        for raw in rows:
-            if not isinstance(raw, dict):
-                continue
-            url = raw.get("url")
-            first_seen = history.get(url) if isinstance(url, str) else None
-            normalized = dict(raw)
-            normalized["first_seen_at"] = first_seen or now.isoformat()
-            car = facebook_hunter.normalize(normalized, "Apify", now,
-                                             provider_at=now)
-            if car is None:
-                continue
-            if car["id"] not in accepted:
-                normalized["photo_urls"] = car["photo_urls"]
-                normalized["seller_type"] = car["seller_classification"]
-                accepted[car["id"]] = normalized
-                if not first_seen:
-                    history[url] = now.isoformat()
-        atomic_json(history_path, dict(list(history.items())[-4000:]))
-        atomic_json(root / "apify_kandidaten.json", list(accepted.values()))
-        status.update({"status": "ok", "received": len(rows),
-                       "accepted": len(accepted), "new_candidates": sum(
-                           r["first_seen_at"] == now.isoformat()
-                           for r in accepted.values())})
-    except (HTTPError, URLError, OSError, ValueError, TimeoutError, TypeError) as error:
-        status["status"] = "http_error" if isinstance(error, HTTPError) else "request_failed"
-        status["error_type"] = type(error).__name__
-        if isinstance(error, HTTPError):
-            status["http_status"] = error.code
+        if not rows:
+            # Zero results can signal provider/API breakage; do not erase the
+            # previous saved candidates or synchronize an empty Facebook feed.
+            status["status"] = "empty_response"
+        else:
+            history_path = root / "apify_seen.json"
+            try:
+                history = json.loads(history_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                history = {}
+            except (OSError, ValueError):
+                raise ValueError("Invalid Facebook history") from None
+            if not isinstance(history, dict):
+                raise ValueError("Invalid Facebook history structure")
+            accepted = {}
+            allowed = ("id", "url", "title", "price", "city", "location",
+                       "listedAt", "listed_at", "year", "year_detected",
+                       "mileage_km", "mileage", "seller_type", "description",
+                       "photo_urls", "images", "photos", "pictures",
+                       "imageUrls", "photoUrls", "image", "imageUrl",
+                       "image_url", "thumbnailUrl", "thumbnail", "photo",
+                       "picture", "primaryImage", "coverPhoto", "mainImage",
+                       "listingImage")
+            for raw in rows:
+                if not isinstance(raw, dict):
+                    continue
+                url = raw.get("url")
+                if not isinstance(url, str) or len(url) > 600:
+                    continue
+                first_seen = history.get(url)
+                normalized = {key: raw[key] for key in allowed if key in raw}
+                if isinstance(normalized.get("description"), str):
+                    normalized["description"] = normalized["description"][:600]
+                normalized["first_seen_at"] = first_seen or now.isoformat()
+                car = facebook_hunter.normalize(normalized, "Apify", now,
+                                                 provider_at=now)
+                if car is None:
+                    continue
+                if car["id"] not in accepted:
+                    # Only bounded, validated photo URLs and normalized
+                    # classification are stored, never unrelated seller data.
+                    normalized["photo_urls"] = car["photo_urls"]
+                    normalized["seller_type"] = car["seller_classification"]
+                    accepted[car["id"]] = normalized
+                    if not first_seen:
+                        history[url] = now.isoformat()
+            status.update({"received": len(rows), "accepted": len(accepted),
+                           "new_candidates": sum(
+                               r["first_seen_at"] == now.isoformat()
+                               for r in accepted.values())})
+            if accepted:
+                atomic_json(history_path, dict(list(history.items())[-4000:]))
+                atomic_json(root / "apify_kandidaten.json", list(accepted.values()))
+                status["status"] = "ok"
+            else:
+                # The provider returned irrelevant parts or malformed entries,
+                # not proof that all historical cars have vanished.
+                status["status"] = "no_vehicle_candidates"
+    except HTTPError as error:
+        status.update({"status": "http_error", "http_status": error.code})
+        set_backoff(root, now, http_code=error.code)
+    except (URLError, OSError, ValueError, TimeoutError, TypeError) as error:
+        status.update({"status": "request_failed", "error_type": type(error).__name__})
+        set_backoff(root, now)
     finally:
         atomic_json(root / "apify_status.json", status)
         persist()

@@ -37,7 +37,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
     def test_provider_spending_fails_closed(self):
         for env in ({}, {"AET_APIFY_MONTHLY_BUDGET_USD":"NaN"},
-                    {"AET_APIFY_MONTHLY_BUDGET_USD":"2","AET_APIFY_MAX_CHARGE_USD":"2"}):
+                    {"AET_APIFY_MONTHLY_BUDGET_USD":"2","AET_APIFY_MAX_CHARGE_USD":"NaN"}):
             with self.subTest(env=env), self.assertRaises(ValueError):
                 apify.bounded_budget(env)
 
@@ -60,7 +60,8 @@ class StandaloneRuntimeTests(unittest.TestCase):
                      "listedAt":now.isoformat()},
                 ]
             def persist():marks.append(("persist",))
-            status = apify.collect(d, env, persist, request_fn=provider, now=now)
+            status = apify.collect(d, env, persist, request_fn=provider, now=now,
+                                   account_check=lambda token, cap: True)
             self.assertEqual(status["status"], "ok")
             self.assertEqual(status["accepted"], 1)
             self.assertEqual(marks[0], ("persist",))
@@ -72,6 +73,7 @@ class StandaloneRuntimeTests(unittest.TestCase):
             budget = json.loads((Path(d)/"apify_budget.json").read_text())
             self.assertEqual(budget["calls"], 1)
             apify.reserve(d, env, persist, now=now)
+            apify.reserve(d, env, persist, now=now)
             with self.assertRaises(ValueError):
                 apify.reserve(d, env, persist, now=now)
 
@@ -81,7 +83,8 @@ class StandaloneRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             counts = []
             status = apify.collect(d, env, lambda: counts.append(1),
-                                   request_fn=lambda token, cap: (_ for _ in ()).throw(URLError("network")))
+                                   request_fn=lambda token, cap: (_ for _ in ()).throw(URLError("network")),
+                                   account_check=lambda token, cap: True)
             self.assertEqual(status["status"], "request_failed")
             self.assertEqual(json.loads((Path(d)/"apify_budget.json").read_text())["calls"], 1)
             self.assertGreaterEqual(len(counts), 2)
@@ -102,6 +105,8 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertTrue(seen["authorization"].startswith("Bearer "))
         self.assertNotIn("safe-token", seen["url"])
         self.assertIn("maxTotalChargeUsd=0.1", seen["url"])
+        self.assertIn("maxPaidDatasetItems=80", seen["url"])
+        self.assertNotIn("maxItems=", seen["url"])
 
     def test_hunter_envelope_compatible_with_original_aet_pro(self):
         from hunter_sync import envelope
@@ -232,6 +237,128 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
                  hunter_sync.ROOT, facebook_hunter.ROOT) = previous
 
+
+
+    def test_free_budget_clamps_old_high_configuration(self):
+        monthly, run = apify.bounded_budget({
+            "AET_APIFY_MONTHLY_BUDGET_USD": "25.00",
+            "AET_APIFY_MAX_CHARGE_USD": "0.40"})
+        self.assertEqual((monthly, run), (4.00, 0.06))
+        self.assertLessEqual(62 * run, monthly)
+        self.assertEqual(apify.bounded_budget({}), (4.00, 0.06))
+        self.assertEqual(apify.MAX_ITEMS_PER_RUN, 80)
+        self.assertEqual(apify.MAX_MONTHLY_STARTS, 70)
+
+    def test_free_account_credit_gate_is_read_only_and_fail_closed(self):
+        import io
+        def fake_open(maximum=5, spent=2):
+            requests = []
+            class Reply:
+                status = 200
+                def __enter__(self): return self
+                def __exit__(self, *_args): return False
+                def read(self, _count):
+                    return json.dumps({"data":{
+                        "limits":{"maxMonthlyUsageUsd": maximum},
+                        "current":{"monthlyUsageUsd": spent}}}).encode()
+            class Opener:
+                def open(self, req, timeout):
+                    requests.append((req.get_method(), req.full_url,
+                                     req.get_header("Authorization"), timeout))
+                    return Reply()
+            return Opener(), requests
+        opener, records = fake_open()
+        self.assertTrue(apify.verify_free_headroom(
+            "safe-token-value-1234567", 0.06, opener))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0][:2], ("GET", apify.ACCOUNT_LIMITS))
+        self.assertNotIn("safe-token", records[0][1])
+        for maximum, spent in ((5, 4.51), (5, 5.0), (100, 1.0), (5, -1)):
+            with self.subTest(maximum=maximum, spent=spent):
+                opener, _ = fake_open(maximum, spent)
+                with self.assertRaises(ValueError):
+                    apify.verify_free_headroom(
+                        "safe-token-value-1234567", 0.06, opener)
+
+    def test_unverifiable_credits_never_start_paid_actor(self):
+        env = {"AET_FACEBOOK_ENABLED":"true",
+               "APIFY_TOKEN":"safe-token-value-1234567"}
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(apify, "fetch_actor") as provider:
+                status = apify.collect(d, env, lambda: None,
+                                       account_check=lambda *_: (_ for _ in ()).throw(
+                                           ValueError("unknown free credits")))
+            self.assertEqual(status["status"], "preflight_failed")
+            provider.assert_not_called()
+            self.assertFalse((Path(d)/"apify_budget.json").exists())
+
+    def test_provider_http_429_creates_real_cooldown_without_second_request(self):
+        from urllib.error import HTTPError
+        env = {"AET_FACEBOOK_ENABLED":"true",
+               "APIFY_TOKEN":"safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        requests = []
+        with tempfile.TemporaryDirectory() as d:
+            def restricted(token, cap):
+                requests.append(True)
+                raise HTTPError("https://api.apify.com", 429, "restricted", None, None)
+            first = apify.collect(d, env, lambda: None,
+                                  request_fn=restricted, now=now,
+                                  account_check=lambda *_: True)
+            self.assertEqual(first["status"], "http_error")
+            self.assertEqual(first["http_status"], 429)
+            self.assertTrue((Path(d)/apify.COOLDOWN_FILE).exists())
+            second = apify.collect(d, env, lambda: None,
+                                   request_fn=restricted, now=now,
+                                   account_check=lambda *_: True)
+            self.assertEqual(second["status"], "provider_cooldown")
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(json.loads((Path(d)/"apify_budget.json").read_text())["calls"], 1)
+
+    def test_empty_or_steering_wheel_only_response_never_erases_valid_cars(self):
+        env = {"AET_FACEBOOK_ENABLED":"true",
+               "APIFY_TOKEN":"safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            old = [{"url":"https://www.facebook.com/marketplace/item/111/",
+                    "title":"Opel Corsa 2012", "price":900}]
+            (Path(d)/"apify_kandidaten.json").write_text(json.dumps(old))
+            for rows, expected in (([], "empty_response"),
+                                   ([{"url":"https://www.facebook.com/marketplace/item/222/",
+                                      "title":"Stuurwiel Opel Corsa",
+                                      "price":450}], "no_vehicle_candidates")):
+                outcome = apify.collect(d, env, lambda: None,
+                                        request_fn=lambda *_: rows,
+                                        now=now, account_check=lambda *_: True)
+                self.assertEqual(outcome["status"], expected)
+                self.assertEqual(json.loads((Path(d)/"apify_kandidaten.json").read_text()),old)
+
+    def test_same_dutch_price_parser_in_facebook_and_marktplaats(self):
+        from facebook_hunter import money
+        self.assertEqual(money("€ 1.250,00"), 1250)
+        self.assertEqual(money("€ 1.250"), 1250)
+        self.assertEqual(money({"amount":"€ 2.999"}), 2999)
+        self.assertIsNone(money("€ 99"))
+        self.assertIsNone(money("€ 20.000"))
+        self.assertIsNone(money("Onbekend"))
+
+    def test_provider_budget_is_persisted_before_chargeable_request(self):
+        env={"AET_FACEBOOK_ENABLED":"true",
+             "APIFY_TOKEN":"safe-token-value-1234567"}
+        with tempfile.TemporaryDirectory() as d:
+            order=[]
+            def persist():
+                order.append("persistent")
+            def provider(token, cap):
+                budget=json.loads((Path(d)/"apify_budget.json").read_text())
+                self.assertEqual(budget["calls"], 1)
+                self.assertEqual(budget["reserved_usd"], 0.06)
+                self.assertEqual(order[0], "persistent")
+                return []
+            status=apify.collect(d, env, persist, request_fn=provider,
+                                 account_check=lambda *_: True)
+            self.assertEqual(status["status"], "empty_response")
+            self.assertGreaterEqual(len(order), 2)
 
 
 if __name__ == "__main__":

@@ -84,12 +84,58 @@ of de toestemming-schakerlaar annuleren een reeds lopende job niet.
    encrypted cache. Bij verdwenen/geëvict cache stoppen ze *veilig*:
    nooit automatisch opnieuw scannen of Apify-budget resetten.
    Inspecteer oorzaak en herstel geschiedenis voor een bewuste bootstrap.
-5. Facebook vereist daarnaast `APIFY_TOKEN` als Secret,
-   `AET_FACEBOOK_ENABLED=true` en de Actions Variables
-   `AET_APIFY_MONTHLY_BUDGET_USD` en
-   `AET_APIFY_MAX_CHARGE_USD` (maximaal 0,50 per start).
+5. Facebook vereist daarnaast `APIFY_TOKEN` als Secret en
+   `AET_FACEBOOK_ENABLED=true` als Actions Variable. De defaults zijn
+   `AET_APIFY_MONTHLY_BUDGET_USD=4.00` en
+   `AET_APIFY_MAX_CHARGE_USD=0.06`, beide in USD.
+   Zelfs wanneer een oudere Actions-variable een hoger bedrag bevat,
+   begrenst de code het op $4 per maand en $0,06 per Actor-start.
    De eerste Facebook-run vereist reeds bestaande state uit Marktplaats;
    ontbrekende quota-geschiedenis mag niet worden genegeerd.
+
+## Apify Free: budget- en stabiliteitsstrategie (oktober 2026)
+
+De officiële Apify Free-tier heeft **$5 gebruikstegoed per maand**;
+het platform stopt als de inbegrepen credits opgebruikt zijn.
+De HydeData Facebook-actor vermeldt een **vanafprijs van $0,30
+per 1.000 listings**. Dat is géén garantie dat elke run alleen
+$0,00030 per advertentie kost: de Actor kan minimum-/run-/computekosten
+of afwijkende prijzen hebben.
+
+De openbare Hunter past daarom strengere grenzen toe:
+- Maximaal **80 opgevraagde advertenties per Facebook-scan**, gevolgd
+  door filters voor volledige auto's, vraagprijs €350–€3.000, km ≤330.000,
+  particuliere verkoper en de leeftijd van advertenties.
+- Maximaal **2 geplande Facebook-scans per dag**, met **70 starts per
+  kalendermaand** als harde extra veiligheidsgrens.
+- Maximaal **$0,06 per Actor-start** en **$4 aan gereserveerde
+  worst-case-uitgaven per kalendermaand**. Bij 62 geplande starts
+  in een maand van 31 dagen wordt maximaal $3,72 gereserveerd.
+  Dit laat minstens $1 van de algemene $5-grens ongeclaimd door
+  onze lokale reserveringen.
+- **Vóór elke potentieel betaalde Actor-aanroep** wordt het werkelijke
+  resterende Apify-tegoed via een gratis, geauthenticeerde **GET**
+  gecontroleerd. Als het niet zeker is dat het een Free-account
+  betreft, het tegoed te laag is of de API faalt: **geen POST, geen kosten**.
+- HTTP 401/402/403/429 zorgt voor 24 uur provider-cooldown.
+  Bij tijdelijke fouten stopt de provider minimaal 2 uur.
+- Lege en uitsluitend onderdelenbevattende resultaten verwijderen
+  de laatst opgeslagen geldige advertenties niet.
+- Budget, cooldown, nieuwe resultaten en geschiedenis worden alleen
+  versleuteld opgeslagen. Bij verloren/verlopen GitHub-cache
+  wordt het budget **nooit automatisch naar nul teruggezet**.
+
+Het theoretische headline-tarief voor maximaal 80 × 62 = 4.960
+listings is $1,49. Dat is **geen nauwkeurige maandprognose** omdat
+echte Actor-kosten kunnen afwijken. Het productiebudget wordt bewaakt
+via de hardere cap van maximaal $0,06 per run en de Apify-accountgrens.
+De Hunter start geen Facebook-Actor zonder
+`AET_FACEBOOK_ENABLED=true` en de overige productiegates.
+
+Actuele bronnen:
+- https://apify.com/pricing
+- https://apify.com/hydedata/facebook-marketplace-scraper/pricing
+- https://docs.apify.com/account/subscriptions
 
 ## Risico's
 

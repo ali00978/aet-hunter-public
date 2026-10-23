@@ -21,7 +21,10 @@ en privé-opslag staan gereed. Dit document is **geen bewijs dat Modal is gedepl
   kandidaten bevatten foto's als de leverancier die aanlevert.
 - Eén Apify-run reserveert een vooraf ingestelde maximale uitgave op schijf
   **voor** het uitvoeren. Bij timeout of fout telt hij nog steeds mee.
-  Facebook is standaard uit tot er expliciet een maandlimiet is ingesteld.
+  Facebook is standaard uit tot de eigenaar AET_FACEBOOK_ENABLED=true
+  instelt. Daarna geldt automatisch een hard plafond van maximaal $4
+  gereserveerde credits/maand, $0,06 per Actor, 80 advertenties/scan
+  en een read-only controle van het resterende Free-tegoed.
 - Wordt Marktplaats beperkt (HTTP 403/429), dan blijft de cooldown privé
   bewaard; er wordt niet geprobeerd blokkades te omzeilen.
 - Geen enkele verkoopmarge wordt gegarandeerd; de AET Pro-import en
