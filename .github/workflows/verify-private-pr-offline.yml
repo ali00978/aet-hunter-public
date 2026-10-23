@@ -1,0 +1,23 @@
+name: Validate private Hunter fix offline (no provider calls)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate private fix branch with sockets disabled
+        env:
+          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+        run: python ops/github/private_pr_offline_validation.py
