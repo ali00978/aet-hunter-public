@@ -11,10 +11,11 @@ from ops.github import private_pr_offline_validation as job
 
 class PrivatePrOfflineValidationTests(unittest.TestCase):
     def test_only_known_private_branch_and_test_modules(self):
-        self.assertEqual(job.BRANCH, "fix/private-schedules-and-sync-guardrails")
+        self.assertEqual(job.BRANCH, "fix/facebook-state-commit-recovery")
         self.assertTrue(job.PRIVATE_REMOTE.endswith("/ali00978/aet-cars-ai-hunter.git"))
         self.assertIn("test_apify_budget_guard", job.TEST_NAMES)
         self.assertIn("test_hunter_sync", job.TEST_NAMES)
+        self.assertIn("test_workflow_state_recovery", job.TEST_NAMES)
         self.assertIn("socket.getaddrinfo = no_network", job.OFFLINE_TEST_RUNNER)
         self.assertNotIn("scanner.py", job.TEST_NAMES)
         self.assertNotIn("apify_test.py", job.TEST_NAMES)
