@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from ops.github import private_snapshot_preflight as check
 
-NOW = datetime(2026, 10, 23, 8, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 22, 8, tzinfo=timezone.utc)
 
 
 def snapshot():
