@@ -49,6 +49,28 @@ To pause scans, change variable `AET_PUBLIC_HUNTER_ENABLED=false`.
 Existing private data will not be deleted. The original private workflows can
 be re-enabled for rollback.
 
+## Manual read-only GitHub + Apify authentication check
+
+A separate manual GitHub Actions workflow is available in
+`.github/workflows/verify-github-apify-readonly.yml`. Choose **Run workflow**
+on **main** to verify two credentials without running a scanner:
+
+- GitHub: authenticated `GET` for the private Hunter's `hunter_sync.py`.
+- Apify: authenticated `GET /v2/users/me`, which confirms the API token's
+  account access without triggering any Apify Actor or spending scan credits.
+
+The workflow is owner/main-only, has read-only checkout, and does not touch
+Marktplaats, Facebook, AET Pro, or private JSON state. Both APIs receive
+tokens in HTTP Authorization headers, and the job prints only HTTP statuses:
+no secret values, usernames, private responses, or tokens in URLs.
+
+A green result proves **GitHub read access** and **Apify account login** only.
+It does NOT test GitHub Contents write permissions, whether the target
+Facebook Actor is allowed on the Apify plan, the updated Cloudflare/AET Pro
+sync secret, or whether actual live scans will succeed. Those steps need
+separate authorized checks. Never treat this green test as approval to
+activate the commercial scheduled hosted runner.
+
 ## Limitations and risks
 
 - No external host is required, but public Actions runs are visible to anyone.
