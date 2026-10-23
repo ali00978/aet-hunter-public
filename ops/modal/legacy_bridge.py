@@ -61,10 +61,38 @@ def verify_credentials(env: dict[str, str]) -> None:
         raise RuntimeError("AET_HUNTER_SYNC_TOKEN is too short")
 
 
+def stage_environment(args: list[str], env: dict[str, str]) -> dict[str, str]:
+    """Give each child process only the specific credentials it requires.
+
+    The private scanner does not need access to a GitHub write token, provider
+    API token, or AET Pro authorization. Git operations need only GitHub auth,
+    the Facebook provider needs only Apify auth, and Hunter sync needs only
+    its endpoint/token. Keeping them out of other processes reduces impact
+    if an ad parser or third-party dependency is ever compromised.
+    """
+    safe = dict(env)
+    for key in ("AET_GITHUB_TOKEN", "APIFY_TOKEN", "AET_HUNTER_SYNC_TOKEN",
+                "AET_PRO_SYNC_URL", "GIT_ASKPASS"):
+        safe.pop(key, None)
+    if args and args[0] == "git":
+        for key in ("AET_GITHUB_TOKEN", "GIT_ASKPASS"):
+            if key in env:
+                safe[key] = env[key]
+    elif "apify_test.py" in args:
+        if "APIFY_TOKEN" in env:
+            safe["APIFY_TOKEN"] = env["APIFY_TOKEN"]
+    elif "hunter_sync.py" in args:
+        for key in ("AET_HUNTER_SYNC_TOKEN", "AET_PRO_SYNC_URL"):
+            if key in env:
+                safe[key] = env[key]
+    return safe
+
+
 def execute(args: list[str], cwd: Path, env: dict[str, str],
             timeout: int = 60, check: bool = True) -> int:
     """Never print a process's stdout/stderr: logs may contain private data."""
-    p = subprocess.run(args, cwd=cwd, env=env, timeout=timeout,
+    child_env = stage_environment(args, env)
+    p = subprocess.run(args, cwd=cwd, env=child_env, timeout=timeout,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if check and p.returncode:
         raise RuntimeError("Stage failed: " + str(args[0]) + " (exit " +
