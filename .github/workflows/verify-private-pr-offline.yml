@@ -1,6 +1,10 @@
 name: Validate private Hunter fix offline (no provider calls)
 on:
   workflow_dispatch:
+  # One-time safe branch test; remove this after observing CI.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-private-pr-offline.yml']
 
 permissions:
   contents: read
