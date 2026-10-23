@@ -1,0 +1,26 @@
+name: Hunter private integration preflight (no live scans)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate encrypted secret presence only, no private connections
+        env:
+          AET_GITHUB_TOKEN: ${{ secrets.AET_GITHUB_TOKEN }}
+          AET_PRO_SYNC_URL: ${{ secrets.AET_PRO_SYNC_URL }}
+          AET_HUNTER_SYNC_TOKEN: ${{ secrets.AET_HUNTER_SYNC_TOKEN }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          AET_PUBLIC_HUNTER_ENABLED: ${{ vars.AET_PUBLIC_HUNTER_ENABLED }}
+          AET_GITHUB_TERMS_APPROVED: ${{ vars.AET_GITHUB_TERMS_APPROVED }}
+        run: python ops/github/connection_preflight.py
