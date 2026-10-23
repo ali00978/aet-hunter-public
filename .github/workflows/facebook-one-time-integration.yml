@@ -8,7 +8,8 @@ on:
 permissions:
   contents: read
 
-# Preflight-diagnostics-only change: POST remains capped at $0.06 and gated.
+# Validate included/prepaid Apify credits separately from billing limit.
+# POST remains capped at $0.06, only if included balance is sufficient.
 # Share the existing private cache-lock. Never launch in parallel with
 # another public Hunter scan or reset the cached Apify spending counters.
 concurrency:

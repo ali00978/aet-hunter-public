@@ -62,9 +62,9 @@ def describe(root):
     name = status.get("status")
     print("Facebook provider status: " + (name if name in safe_states else "unknown"))
     allowed_reason = (
-        "apify_balance_format_unknown", "apify_account_limit_exceeds_free",
-        "apify_free_monthly_reserve_exhausted", "apify_remaining_free_credit_low",
-        "Apify free-credit check failed; no Actor started", "provider_gate_unknown",
+        "apify_balance_format_unknown", "apify_account_data_unknown",
+        "apify_included_credit_unknown", "apify_free_monthly_reserve_exhausted",
+        "apify_remaining_included_credit_low", "provider_gate_unknown",
     )
     if status.get("preflight_reason") in allowed_reason:
         print("Facebook safety gate: " + status["preflight_reason"])

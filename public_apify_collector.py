@@ -28,6 +28,7 @@ LOCAL_MONTHLY_RESERVE_USD = 4.00
 DEFAULT_MAX_RUN_USD = 0.06
 COOLDOWN_FILE = "apify_backoff.json"
 ACCOUNT_LIMITS = "https://api.apify.com/v2/users/me/limits"
+ACCOUNT_PLAN = "https://api.apify.com/v2/users/me"
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -80,40 +81,67 @@ def bounded_budget(env):
 
 
 def verify_free_headroom(token, cap, opener=None):
-    """One FREE GET; never start a paid Actor if account credit is uncertain."""
+    """Allow one capped Actor only within VERIFIED included/prepaid usage.
+
+    Apify account monthly limits can be higher than included plan credits.
+    A $100 billing ceiling is NOT $100 of free credits. Read plan credits
+    separately and require a $0.50 cushion below BOTH account limit and
+    included usage. Never perform a paid POST if either GET fails.
+    """
     if not isinstance(token, str) or len(token.strip()) < 15:
         raise ValueError("Missing Apify token")
-    request = Request(ACCOUNT_LIMITS, method="GET", headers={
-        "Authorization": "Bearer " + token.strip(),
-        "Accept": "application/json",
-        "User-Agent": "AET-Hunter-Free-Budget-Guard/1",
-    })
+    if type(cap) not in (int, float) or not 0 < cap <= DEFAULT_MAX_RUN_USD:
+        raise ValueError("Apify test charge cap invalid")
     opener = opener or build_opener(NoRedirect())
-    try:
-        with opener.open(request, timeout=12) as response:
-            raw = response.read(60001)
-            if response.status != 200 or len(raw) > 60000:
-                raise ValueError("Apify free-credit balance unavailable")
-        obj = json.loads(raw.decode("utf-8"))
-        info = obj.get("data") if isinstance(obj, dict) else None
-        limits = info.get("limits") if isinstance(info, dict) else None
-        current = info.get("current") if isinstance(info, dict) else None
-        maximum = limits.get("maxMonthlyUsageUsd") if isinstance(limits, dict) else None
-        spent = current.get("monthlyUsageUsd") if isinstance(current, dict) else None
-        if (type(maximum) not in (int, float) or type(spent) not in (int, float)
-                or not math.isfinite(maximum) or not math.isfinite(spent)
-                or spent < 0 or maximum <= 0):
-            raise ValueError("apify_balance_format_unknown")
-        if maximum > FREE_MONTHLY_CREDIT_USD + .01:
-            raise ValueError("apify_account_limit_exceeds_free")
-        # Reserve a dollar outside this Hunter and $0.50 on the account.
-        if spent >= LOCAL_MONTHLY_RESERVE_USD:
-            raise ValueError("apify_free_monthly_reserve_exhausted")
-        if spent + cap + 0.50 > maximum + 1e-8:
-            raise ValueError("apify_remaining_free_credit_low")
-    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError,
-            TypeError, KeyError, json.JSONDecodeError) as error:
-        raise ValueError("Apify free-credit check failed; no Actor started") from error
+
+    def account_get(url):
+        req = Request(url, method="GET", headers={
+            "Authorization": "Bearer " + token.strip(),
+            "Accept": "application/json",
+            "User-Agent": "AET-Hunter-Included-Credit-Guard/2",
+        })
+        try:
+            with opener.open(req, timeout=12) as response:
+                raw = response.read(60001)
+                if response.status != 200 or len(raw) > 60000:
+                    raise ValueError("apify_account_data_unknown")
+            result = json.loads(raw.decode("utf-8"))
+            data = result.get("data") if isinstance(result, dict) else None
+            if not isinstance(data, dict):
+                raise ValueError("apify_account_data_unknown")
+            return data
+        except (HTTPError, URLError, TimeoutError, OSError, UnicodeError,
+                TypeError, KeyError, json.JSONDecodeError) as error:
+            raise ValueError("apify_account_data_unknown") from error
+
+    limits_data = account_get(ACCOUNT_LIMITS)
+    limits = limits_data.get("limits")
+    current = limits_data.get("current")
+    maximum = limits.get("maxMonthlyUsageUsd") if isinstance(limits, dict) else None
+    spent = current.get("monthlyUsageUsd") if isinstance(current, dict) else None
+    if (type(maximum) not in (int, float) or type(spent) not in (int, float)
+            or not math.isfinite(maximum) or not math.isfinite(spent)
+            or spent < 0 or maximum <= 0):
+        raise ValueError("apify_balance_format_unknown")
+
+    user_data = account_get(ACCOUNT_PLAN)
+    plan = user_data.get("plan")
+    if not isinstance(plan, dict):
+        raise ValueError("apify_included_credit_unknown")
+    included = plan.get("monthlyUsageCreditsUsd")
+    if type(included) not in (int, float) or not math.isfinite(included) or included <= 0:
+        raise ValueError("apify_included_credit_unknown")
+    base_price = plan.get("monthlyBasePriceUsd")
+    if type(base_price) not in (int, float) or not math.isfinite(base_price) or base_price < 0:
+        raise ValueError("apify_included_credit_unknown")
+    # A Free plan is worth at most $5. Any other tier must still be within
+    # prepaid credits so the test never causes additional pay-as-you-go fees.
+    if base_price == 0 and included > FREE_MONTHLY_CREDIT_USD + .01:
+        raise ValueError("apify_included_credit_unknown")
+    if base_price == 0 and spent >= LOCAL_MONTHLY_RESERVE_USD:
+        raise ValueError("apify_free_monthly_reserve_exhausted")
+    if spent + cap + 0.50 > min(maximum, included) + 1e-8:
+        raise ValueError("apify_remaining_included_credit_low")
     return True
 
 
@@ -234,10 +262,10 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None):
         # codes. Never log tokens, raw API responses, or credit amounts.
         reason = str(error)
         allowed_reasons = ("apify_balance_format_unknown",
-                           "apify_account_limit_exceeds_free",
+                           "apify_account_data_unknown",
+                           "apify_included_credit_unknown",
                            "apify_free_monthly_reserve_exhausted",
-                           "apify_remaining_free_credit_low",
-                           "Apify free-credit check failed; no Actor started")
+                           "apify_remaining_included_credit_low")
         status["preflight_reason"] = (
             reason if reason in allowed_reasons else "provider_gate_unknown")
         atomic_json(root / "apify_status.json", status)

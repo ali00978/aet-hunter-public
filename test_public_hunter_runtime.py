@@ -250,32 +250,51 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertEqual(apify.MAX_MONTHLY_STARTS, 70)
 
     def test_free_account_credit_gate_is_read_only_and_fail_closed(self):
-        import io
-        def fake_open(maximum=5, spent=2):
+        def fake_open(maximum=5, spent=2, included=5, price=0):
             requests = []
             class Reply:
                 status = 200
+                def __init__(self, payload): self.payload = payload
                 def __enter__(self): return self
                 def __exit__(self, *_args): return False
                 def read(self, _count):
-                    return json.dumps({"data":{
-                        "limits":{"maxMonthlyUsageUsd": maximum},
-                        "current":{"monthlyUsageUsd": spent}}}).encode()
+                    return json.dumps({"data":self.payload}).encode()
             class Opener:
                 def open(self, req, timeout):
                     requests.append((req.get_method(), req.full_url,
                                      req.get_header("Authorization"), timeout))
-                    return Reply()
+                    if req.full_url == apify.ACCOUNT_LIMITS:
+                        return Reply({"limits":{"maxMonthlyUsageUsd":maximum},
+                                      "current":{"monthlyUsageUsd":spent}})
+                    if req.full_url == apify.ACCOUNT_PLAN:
+                        return Reply({"plan":{"monthlyUsageCreditsUsd":included,
+                                              "monthlyBasePriceUsd":price}})
+                    raise RuntimeError("Unexpected API GET")
             return Opener(), requests
         opener, records = fake_open()
         self.assertTrue(apify.verify_free_headroom(
             "safe-token-value-1234567", 0.06, opener))
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0][:2], ("GET", apify.ACCOUNT_LIMITS))
-        self.assertNotIn("safe-token", records[0][1])
-        for maximum, spent in ((5, 4.51), (5, 5.0), (100, 1.0), (5, -1)):
-            with self.subTest(maximum=maximum, spent=spent):
-                opener, _ = fake_open(maximum, spent)
+        self.assertEqual([r[:2] for r in records],
+                         [("GET", apify.ACCOUNT_LIMITS),
+                          ("GET", apify.ACCOUNT_PLAN)])
+        for record in records:
+            self.assertNotIn("safe-token", record[1])
+        # A high spending ceiling is allowed only when separate prepaid
+        # credits are verified. A low included balance must stop the call.
+        opener, _ = fake_open(maximum=100, spent=1, included=5, price=0)
+        self.assertTrue(apify.verify_free_headroom(
+            "safe-token-value-1234567", 0.06, opener))
+        opener, _ = fake_open(maximum=100, spent=11, included=19, price=19)
+        self.assertTrue(apify.verify_free_headroom(
+            "safe-token-value-1234567", 0.06, opener))
+        for maximum, spent, included, price in (
+                (5, 4.51, 5, 0), (5, 5.0, 5, 0),
+                (100, 10, 5, 0), (5, -1, 5, 0),
+                (100, 4.9, 5, 19), (100, 1, 0, 0),
+                (100, 1, None, 0), (100, 1, 19, None)):
+            with self.subTest(maximum=maximum, spent=spent,
+                              included=included, price=price):
+                opener, _ = fake_open(maximum, spent, included, price)
                 with self.assertRaises(ValueError):
                     apify.verify_free_headroom(
                         "safe-token-value-1234567", 0.06, opener)
