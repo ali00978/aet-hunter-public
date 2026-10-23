@@ -166,6 +166,20 @@ If GitHub repository metadata shows `permissions.push=true`, this is an
 *indication* of repository role, **not proof** the fine-grained token can
 push protected files to main. No write request is made by this check.
 
+## Validate private Hunter fixes without consuming private Actions minutes
+
+The manual workflow `.github/workflows/verify-private-pr-offline.yml` is
+a **software test only**. It clones the named private feature branch using the
+stored `AET_GITHUB_TOKEN` with no GitHub write API call, removes all cloud
+and provider tokens from the child test environment and disables socket
+connections for the Python regression suite. Private code stays in a
+temporary directory; logs report aggregate test counts only. No marketplace
+requests, Apify Actor runs, private commits or AET Pro sync occurs.
+
+This is not a replacement for an end-to-end test on a permitted executor.
+If the private feature branch changes name, the fixed validation target must
+be reviewed and updated before rerunning.
+
 ## Limitations and risks
 
 - No external host is required, but public Actions runs are visible to anyone.
