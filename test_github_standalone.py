@@ -12,7 +12,6 @@ from ops.github import standalone_hunter_runner as gh
 TOKEN = "strong-random-sync-placeholder-aaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ENV = {
     "AET_PUBLIC_HUNTER_ENABLED": "true",
-    "AET_GITHUB_TERMS_APPROVED": "true",
     "GITHUB_REPOSITORY": gh.OWNER,
     "GITHUB_REF": gh.MAIN,
     "GITHUB_EVENT_NAME": "workflow_dispatch",
@@ -23,16 +22,20 @@ ENV = {
 
 
 class GithubStandaloneTests(unittest.TestCase):
-    def test_requires_actual_github_approval_flag(self):
+    def test_owner_and_event_permissions(self):
         for name, value in (
             ("AET_PUBLIC_HUNTER_ENABLED", "false"),
-            ("AET_GITHUB_TERMS_APPROVED", "false"),
             ("GITHUB_REPOSITORY", "random/fork"),
             ("GITHUB_REF", "refs/heads/feature"),
             ("GITHUB_EVENT_NAME", "pull_request"),
+            ("GITHUB_EVENT_NAME", "push"),
         ):
             with self.subTest(name=name), self.assertRaises(PermissionError):
                 gh.authorize({**ENV, name: value})
+
+    def test_first_push_only_allows_explicit_bootstrap(self):
+        self.assertEqual(gh.authorize({**ENV,"GITHUB_EVENT_NAME":"push",
+                                       "AET_STATE_BOOTSTRAP":"true"}), "marktplaats")
 
     def test_no_private_git_auth_needed(self):
         self.assertEqual(gh.authorize(dict(ENV)), "marktplaats")

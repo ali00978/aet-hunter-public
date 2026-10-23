@@ -1,7 +1,6 @@
 # GitHub openbaar is Plan A: AET Hunter zelfstandig in Actions
 
-**Stand op 23 oktober 2026:** De scanbroncode en de AET Pro-sync zijn getest.
-Dit is een voorbereid, standaard uitgeschakeld commercieel productieschema.
+**Stand op 23 oktober 2026:** De zelfstandige workflow is ingesteld op automatische starts op de openbare GitHub-repository. De eigenaar heeft opdracht gegeven de GitHub-hosted uitvoering te activeren. Controleer dat de eerste run succesvol is en dat de versleutelde cache wordt opgeslagen. De uitvoer blijft afhankelijk van de GitHub-voorwaarden.
 De originele privé-repository en haar Actions blijven ongemoeid.
 
 ## Hoe gaat een run?
@@ -23,36 +22,34 @@ De originele privé-repository en haar Actions blijven ongemoeid.
 - Er worden geen car-advertenties, snapshots of logs met volledige
   kentekens, foto's of URLs als open artifacts gepubliceerd.
 
-## Wanneer kan de automatische scan echt worden ingeschakeld?
+## GitHub-hosted risico en pauzeren
 
-Volgens GitHub's actuele [Additional Product Terms](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features)
-mag GitHub-hosted Actions niet zonder meer worden gebruikt voor
-terugkerende commerciële workloads buiten het bouwen/testen/deployen van
-het repositoryproject. Vraag bij [GitHub Support](https://support.github.com/)
-expliciet toestemming voor 12 Marktplaats productiescans/dag en maximaal
-2 Facebook-providerstarts/dag vanuit een **publieke** repository. Beschrijf
-het daadwerkelijke gebruik. **Een gebruiker die het risico accepteert is
-niet hetzelfde als toestemming van GitHub.**
+De eigenaar kiest uitdrukkelijk GitHub-hosted als plan A. Let op: GitHub's
+[Additional Product Terms](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features)
+beperken hosted runners tot softwareontwikkeling, testen, bouwen,
+deployen en publiceren. Terugkerend commercieel scannen kan buiten deze
+voorwaarden vallen. GitHub heeft voor deze specifieke productieactiviteiten
+**geen goedkeuring bevestigd** en kan workflows of het account beperken.
+De workflow doet daarom geen onjuiste claim van GitHub-toestemming.
 
-Alleen na een duidelijke bevestiging mag je onder
+**Direct pauzeren:** maak onder
 [Actions Variables](https://github.com/ali00978/aet-hunter-public/settings/variables/actions)
-beide waarden op `true` instellen:
+`AET_PUBLIC_HUNTER_ENABLED=false`. Dit stopt toekomstige geplande jobs;
+een al gestarte run moet apart worden gestopt.
 
-- `AET_GITHUB_TERMS_APPROVED=true` — uitsluitend wanneer GitHub deze
-  concrete workload schriftelijk heeft toegestaan.
-- `AET_PUBLIC_HUNTER_ENABLED=true` — eigenaar wil de scan inschakelen.
-
-Er zijn al twee Actions Secrets gecontroleerd via een veilige AET Pro
-handshake: `AET_PRO_SYNC_URL` en `AET_HUNTER_SYNC_TOKEN`. De autorisatie
-gaf HTTP 422 bij opzettelijk ongeldige data, en HTTP 401 zonder token. De
-juiste, voldoende willekeurige geheime waarden moeten beschikbaar blijven.
+AET Pro Secrets `AET_PRO_SYNC_URL` en `AET_HUNTER_SYNC_TOKEN` zijn eerder
+gecontroleerd met HTTP 422 op een bewust ongeldig bericht en HTTP 401
+zonder token. Bewaar deze Secrets privé. Er is geen token nodig
+voor de originele privé-repository.
 
 ## Eerste activering en herstel
 
-1. Open [AET Hunter PUBLIC standalone scanners](https://github.com/ali00978/aet-hunter-public/actions/workflows/public-original-hunter.yml).
-2. Na toegestane activering: kies `Run workflow` op main,
-   `platform=marktplaats`, **`bootstrap_state=true` alleen voor de
-   eerste run**. De eerste scan creëert versleutelde state.
+1. De eenmalige activerings-commit triggert automatisch de eerste
+   Marktplaats-run op de openbare repository, zonder gebruik van privé-Actions.
+2. Als dit niet gebeurt, inspecteer [AET Hunter PUBLIC standalone scanners](https://github.com/ali00978/aet-hunter-public/actions/workflows/public-original-hunter.yml)
+   voordat je opnieuw probeert. Bij herstel mag `bootstrap_state=true` alleen
+   worden gebruikt als zeker is dat er nog geen geldige historie of Apify-budget
+   bestaat; anders kan de historie verloren gaan.
 3. Controleer in de logs of de scan `synced` meldt en of de
    `actions/cache/save@v4` stap werkelijk de versleutelde cache heeft
    opgeslagen. Een groen resultaat zonder cache-save telt niet als

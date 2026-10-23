@@ -5,11 +5,18 @@ Marktplaats-scanner, Facebook/Apify-verwerking, marktwaardebeoordeling en het
 bestaande AET Pro-importcontract.
 
 **Plan A:** GitHub Actions in deze **openbare** repository (geen privé-repository).
-De workflow `.github/workflows/public-original-hunter.yml` heeft een
-twee-uursplanning voor Marktplaats en een afzonderlijke Facebook-planning.
-Productiescans worden standaard overgeslagen totdat GitHub het bedoelde
-terugkerende commerciële gebruik toestaat en de eigenaar dat expliciet met
-Actions Variables activeert. Dit is geen claim dat GitHub goedkeuring gaf.
+De workflow `.github/workflows/public-original-hunter.yml` heeft
+een twee-uursplanning voor Marktplaats en een afzonderlijke Facebook-planning.
+De eigenaar heeft opdracht gegeven eenmalig de openbare Marktplaats-scan
+te activeren. Bij de eerste succesvolle run worden de scanresultaten
+beveiligd gesynchroniseerd met AET Pro en de historie versleuteld
+gecachet. Een mislukte of overgeslagen run bewijst geen productiewerking.
+
+**GitHub-gebruiksvoorwaarden:** GitHub-hosted Actions mag volgens de
+Additional Product Terms niet voor willekeurige commerciële workloads worden
+gebruikt. Er is **geen GitHub-goedkeuring aangetoond** voor deze scans.
+De gebruiker loopt het risico dat GitHub de Actions, repository of account
+beperkt. Bij problemen: Plan B, een afzonderlijke host.
 
 **Privé-informatie:** de Actions-code gebruikt AES-256-GCM om historie, advertentie-
 en providergegevens vóór GitHub-caching te versleutelen. De encryptiesleutel
