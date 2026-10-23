@@ -107,7 +107,6 @@ class StandaloneRuntimeTests(unittest.TestCase):
         self.assertIn("maxTotalChargeUsd=0.1", seen["url"])
         self.assertIn("maxItems=80", seen["url"])
         self.assertNotIn("maxPaidDatasetItems", seen["url"])
-        self.assertNotIn("maxItems=", seen["url"])
 
     def test_hunter_envelope_compatible_with_original_aet_pro(self):
         from hunter_sync import envelope
