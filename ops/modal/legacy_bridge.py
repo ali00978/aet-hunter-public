@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -176,14 +177,29 @@ def scan_facebook(root: Path, env: dict[str, str]) -> None:
     # before tests, API requests or sync when already exhausted; MP is separate.
     from datetime import datetime, timezone
     budget = get_status(root, "apify_budget.json")
+    budget_path = root / "apify_budget.json"
+    # A corrupt persisted budget must never be treated as zero usage.
+    if budget_path.is_file() and not budget:
+        raise RuntimeError("Facebook: invalid budget; no paid provider request")
     if budget.get("month") == datetime.now(timezone.utc).strftime("%Y-%m"):
-        used = budget.get("calls", 0)
-        if isinstance(used, int) and not isinstance(used, bool) and used >= 100:
+        used = budget.get("calls")
+        if isinstance(used, bool) or not isinstance(used, int) or used < 0 or used > 100:
+            raise RuntimeError("Facebook: invalid monthly call counter; no provider request")
+        if used >= 100:
             print("Facebook: SKIPPED (100 monthly provider requests already used)")
             return
     execute([sys.executable, "-m", "unittest", "-q", "test_hunter.py"],
             root, env, timeout=120)
-    execute([sys.executable, "apify_test.py"], root, env, timeout=170)
+    # apify_test.py reserves a call in the budget BEFORE its HTTP request.
+    # If the process crashes or times out, preserve that reservation rather
+    # than repeatedly retrying an unrecorded potentially billable request.
+    try:
+        execute([sys.executable, "apify_test.py"], root, env, timeout=170)
+    except Exception:
+        if budget_path.is_file():
+            publish_snapshots(root, env, ("apify_budget.json",),
+                              "Preserve Facebook provider call reservation after failure")
+        raise
     execute([sys.executable, "hunter_pro_combined.py"], root, env, timeout=100)
     publish_snapshots(root, env, FB_STATE, "Store Apify Facebook test results")
     if get_status(root, "apify_status.json").get("status") != "ok":
@@ -205,6 +221,13 @@ def run_original_hunter(env: dict[str, str] | None = None,
         print("DISABLED: no live requests or private repository access")
         return
     verify_credentials(env, platform)
+    # Non-GitHub runners otherwise inherit hunter_sync.py's constant "1"
+    # fallback, reusing source:1:1 on every scan in AET Pro. Generate one
+    # numeric run ID per invocation while retaining real GitHub run IDs.
+    if not env.get("GITHUB_RUN_ID", "").isdigit():
+        env["GITHUB_RUN_ID"] = str(time.time_ns())
+    if not env.get("GITHUB_RUN_ATTEMPT", "").isdigit():
+        env["GITHUB_RUN_ATTEMPT"] = "1"
     with tempfile.TemporaryDirectory(prefix="aet-hunter-private-") as tmp:
         scratch = Path(tmp)
         work = prepare_clone(scratch, env, platform)
