@@ -170,5 +170,56 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
 
 
+    def test_facebook_provider_snapshot_to_aet_pro_batch_without_network(self):
+        import hunter_sync
+        import hunter_feed
+        import hunter_pro_combined
+        import facebook_hunter
+        import public_apify_collector
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            env = {
+                "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+                "AET_FACEBOOK_ENABLED": "true",
+                "AET_PRO_SYNC_URL":
+                  "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                "AET_HUNTER_SYNC_TOKEN": "x" * 26,
+                "AET_HUNTER_STATE_DIR": d,
+            }
+            previous = (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                        hunter_sync.ROOT, facebook_hunter.ROOT)
+            outputs = []
+            def fake_collect(folder, supplied_env, persist):
+                self.assertEqual(Path(folder), root)
+                record = {"url":"https://www.facebook.com/marketplace/item/123456789/",
+                          "title":"Opel Corsa 2012", "price":950, "mileage_km":145000,
+                          "listedAt":now.isoformat(), "first_seen_at":now.isoformat(),
+                          "seller_type":"particulier"}
+                (root / "apify_status.json").write_text(json.dumps(
+                    {"checked_at":now.isoformat(),"status":"ok"}), encoding="utf-8")
+                (root / "apify_kandidaten.json").write_text(json.dumps([record]),
+                    encoding="utf-8")
+                persist()
+                return {"checked_at":now.isoformat(),"status":"ok"}
+            def fake_sync(payload, *_args):
+                outputs.append(payload)
+                return {"received":True}
+            try:
+                with patch.object(public_apify_collector, "collect", side_effect=fake_collect):
+                    with patch.object(hunter_sync, "send", side_effect=fake_sync):
+                        result = runtime.run_platform("facebook", env=env)
+                self.assertEqual(result, "synced")
+                self.assertEqual(outputs[0]["schema"], "aet-pro.hunter.sync.v1")
+                self.assertEqual(outputs[0]["scan"]["platform"], "facebook")
+                self.assertEqual(outputs[0]["scan"]["candidate_ids"], ["facebook:123456789"])
+                self.assertEqual(outputs[0]["batch"]["platform_counts"]["facebook"], 1)
+                self.assertTrue(outputs[0]["batch"]["candidates"][0]["needs_inspection"])
+            finally:
+                (hunter_feed.ROOT, hunter_pro_combined.OUTPUT,
+                 hunter_sync.ROOT, facebook_hunter.ROOT) = previous
+
+
+
 if __name__ == "__main__":
     unittest.main()
