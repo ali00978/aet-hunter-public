@@ -22,6 +22,8 @@ ALLOW = {
     ".github/workflows/manual-connection-preflight.yml",
     "ops/github/readonly_connection_check.py", "test_readonly_connection_check.py",
     ".github/workflows/verify-github-apify-readonly.yml",
+    "ops/github/aet_pro_handshake.py", "test_aet_pro_handshake.py",
+    ".github/workflows/verify-aet-pro-handshake.yml",
 }
 
 tracked = set(filter(None, subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\x00")))
@@ -74,4 +76,17 @@ if ("  workflow_dispatch:" not in read_only_workflow
         or "secrets.APIFY_TOKEN" not in read_only_workflow
         or "secrets.AET_HUNTER_SYNC_TOKEN" in read_only_workflow):
     raise SystemExit("Manual API probe must remain read-only and owner-gated")
+aet_pro_handshake_workflow = Path(".github/workflows/verify-aet-pro-handshake.yml").read_text(encoding="utf-8")
+if ("  workflow_dispatch:" not in aet_pro_handshake_workflow
+        or "  schedule:" in aet_pro_handshake_workflow
+        or "  pull_request:" in aet_pro_handshake_workflow
+        or "github.repository == 'ali00978/aet-hunter-public'" not in aet_pro_handshake_workflow
+        or "github.ref == 'refs/heads/main'" not in aet_pro_handshake_workflow
+        or "persist-credentials: false" not in aet_pro_handshake_workflow
+        or "ops/github/aet_pro_handshake.py" not in aet_pro_handshake_workflow
+        or "secrets.AET_PRO_SYNC_URL" not in aet_pro_handshake_workflow
+        or "secrets.AET_HUNTER_SYNC_TOKEN" not in aet_pro_handshake_workflow
+        or "secrets.AET_GITHUB_TOKEN" in aet_pro_handshake_workflow
+        or "secrets.APIFY_TOKEN" in aet_pro_handshake_workflow):
+    raise SystemExit("Manual AET Pro handshake must be owner-only and contain no live scanner actions")
 print("Public development tree passes allowlist, secrets and owner-gate checks")
