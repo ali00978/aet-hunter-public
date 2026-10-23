@@ -30,6 +30,6 @@ jobs:
       - name: Verify no private data files or scheduled live scans are tracked
         run: python public_guard.py
       - name: Compile deployment wrappers without running live scanners
-        run: python -m py_compile ops/modal/hunter_modal.py ops/modal/legacy_bridge.py ops/github/public_actions_runner.py
+        run: python -m py_compile ops/modal/hunter_modal.py ops/modal/legacy_bridge.py ops/github/public_actions_runner.py ops/github/public_marktplaats_integration.py
       - name: Run offline code tests with sockets disabled
         run: python run_offline_tests.py

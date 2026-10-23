@@ -1,0 +1,29 @@
+name: AET Marktplaats one-time live integration test
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/marktplaats-one-time-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aet-one-time-marktplaats-integration
+  cancel-in-progress: true
+
+jobs:
+  scanner-integration-test:
+    if: ${{ github.repository == 'ali00978/aet-hunter-public' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: one-time public Marktplaats integration') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exercise entire public Marktplaats scanner once, private data disabled
+        run: python -m ops.github.public_marktplaats_integration
