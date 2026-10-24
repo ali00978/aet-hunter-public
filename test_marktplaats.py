@@ -21,6 +21,23 @@ def vehicle(url=URL, price=1250, **fields):
             'offers': {'price': price, 'priceCurrency': 'EUR'}, **fields}
 
 class MarktplaatsTests(unittest.TestCase):
+    def test_state_json_is_compact_and_preserves_comparables(self):
+        # Production retains large private archives behind a 4 MB file cap.
+        # Whitespace must not consume that cap or discard comparison records.
+        rows = [{'url': f'https://www.marktplaats.nl/v/auto-s/opel/m{i}',
+                 'title': 'Opel Corsa €', 'description': 'goed onderhouden ' * 60,
+                 'mileage_km': 180000 + i, 'price': 1250 + i}
+                for i in range(1200)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'marktplaats_vergelijkingen.json'
+            scanner.write_json_state(path, rows)
+            saved = path.read_bytes()
+            self.assertEqual(json.loads(saved.decode('utf-8')), rows)
+            self.assertLess(len(saved), len(json.dumps(
+                rows, ensure_ascii=False, indent=2).encode('utf-8')))
+            self.assertIn('€'.encode('utf-8'), saved)
+            self.assertNotIn(b'\\n  {', saved)
+
     def test_recommendation_cannot_overwrite_vehicle(self):
         data = scanner.extract_fields(scanner.parse(page([
             vehicle(description='Motor defect, loopt niet.', vehicleModelDate=2011),
