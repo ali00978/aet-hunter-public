@@ -109,7 +109,10 @@ def write_json_state(path, data):
     and clean up the temporary file even when replacement fails.
     """
     destination = Path(path)
-    payload = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False)
+    # Compact serialization preserves every field while reducing large rolling
+    # comparison archives below the encrypted checkpoint's per-file byte cap.
+    # Pretty-print whitespace is not part of the persisted JSON schema.
+    payload = json.dumps(data, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
