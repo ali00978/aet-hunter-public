@@ -73,6 +73,55 @@ class GithubStandaloneTests(unittest.TestCase):
                      "hunter_pro_combined.json"):
             self.assertIn(name, gh.STATE_FILES)
 
+    def test_large_marktplaats_archive_round_trips_without_losing_comparables(self):
+        # A full rolling archive can exceed the old 4 MB per-file cache cap.
+        # Compression is internal to encrypted state, never to scanner JSON.
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "original"
+            root.mkdir()
+            rows = [
+                {"url": f"https://www.marktplaats.nl/v/auto-s/opel/m{i}",
+                 "title": f"Opel Corsa {i}", "price": 1500 + i % 300,
+                 "mileage_km": 180000 + i,
+                 "description": ("onderhoudshistorie compleet " * 120) + str(i)}
+                for i in range(1400)
+            ]
+            original = root / "marktplaats_vergelijkingen.json"
+            original.write_text(json.dumps(rows, ensure_ascii=False,
+                                           separators=(",", ":")), encoding="utf-8")
+            self.assertGreater(original.stat().st_size, gh.FILE_LIMIT)
+            facebook_budget = {"month": "2026-10", "calls": 2}
+            (root / "apify_budget.json").write_text(json.dumps(facebook_budget),
+                                                      encoding="utf-8")
+            saved = gh.collect_state(root)
+            packed = saved["files"]["marktplaats_vergelijkingen.json"]
+            self.assertIn(gh.MP_COMPRESSION_TAG, packed)
+            self.assertEqual(saved["files"]["apify_budget.json"], facebook_budget)
+            restored = gh.unseal(gh.seal(saved, TOKEN), TOKEN)
+            destination = Path(scratch) / "restored"
+            gh.restore_state(destination, restored)
+            self.assertEqual(json.loads(
+                (destination / "marktplaats_vergelijkingen.json").read_text()), rows)
+            self.assertEqual(json.loads(
+                (destination / "apify_budget.json").read_text()), facebook_budget)
+
+    def test_compressed_marktplaats_archive_corruption_fails_closed(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            state = {"files": {"marktplaats_vergelijkingen.json": {
+                gh.MP_COMPRESSION_TAG: "not-valid-base64!",
+                "original_size": 100,
+            }}}
+            with self.assertRaises(ValueError):
+                gh.restore_state(Path(scratch), state)
+
+    def test_facebook_large_state_remains_subject_to_original_file_cap(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "apify_kandidaten.json"
+            path.write_text(json.dumps([{"data": "x" * (gh.FILE_LIMIT + 10)}]),
+                            encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unbounded/non-file"):
+                gh.collect_state(scratch)
+
     def test_unapproved_state_names_rejected(self):
         with self.assertRaises(ValueError):
             gh.seal({"schema": "aet.hunter.state.v1",

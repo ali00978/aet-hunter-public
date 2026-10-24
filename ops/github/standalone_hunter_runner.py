@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import zlib
 import os
 import secrets
 import sys
@@ -24,6 +25,10 @@ MAGIC = b"AETHUNTER-STATE-1\x00"
 AAD = b"ali00978/aet-hunter-public:encrypted-state:v1"
 CACHE_LIMIT = 16_000_000
 FILE_LIMIT = 4_000_000
+# Only Marktplaats can exceed the legacy 4 MB JSON limit. Its larger records
+# are losslessly compressed inside the encrypted cache; Facebook stays as-is.
+MARKTPLAATS_FILE_LIMIT = 12_000_000
+MP_COMPRESSION_TAG = "__aet_marktplaats_zlib_v1__"
 STATE_FILES = frozenset((
     "marktplaats_wachtrij.json",
     "marktplaats_handmatig_controleren.json",
@@ -131,19 +136,65 @@ def unseal(blob, token):
     return result
 
 
+def _pack_marktplaats_state(name, data):
+    """Preserve large Marktplaats JSON records without discarding comparables."""
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"),
+                     allow_nan=False).encode("utf-8")
+    if len(raw) > MARKTPLAATS_FILE_LIMIT:
+        raise ValueError("Marktplaats state exceeds bounded raw size")
+    packed = {
+        MP_COMPRESSION_TAG: base64.b64encode(zlib.compress(raw, level=9)).decode("ascii"),
+        "original_size": len(raw),
+    }
+    if len(json.dumps(packed, separators=(",", ":")).encode("utf-8")) > FILE_LIMIT:
+        raise ValueError("Marktplaats compressed state exceeds bounded size")
+    return packed
+
+
+def _unpack_marktplaats_state(name, data):
+    """Restore only authenticated, bounded Marktplaats cache entries."""
+    if not (name.startswith("marktplaats_") and isinstance(data, dict)
+            and MP_COMPRESSION_TAG in data):
+        return data
+    if set(data) != {MP_COMPRESSION_TAG, "original_size"}:
+        raise ValueError("Invalid compressed Marktplaats state structure")
+    expected = data["original_size"]
+    encoded = data[MP_COMPRESSION_TAG]
+    if (type(expected) is not int or not 0 <= expected <= MARKTPLAATS_FILE_LIMIT
+            or not isinstance(encoded, str) or len(encoded) > FILE_LIMIT):
+        raise ValueError("Invalid compressed Marktplaats state bounds")
+    try:
+        compressed = base64.b64decode(encoded, validate=True)
+        decompressor = zlib.decompressobj()
+        raw = decompressor.decompress(compressed, MARKTPLAATS_FILE_LIMIT + 1)
+        if (not decompressor.eof or decompressor.unused_data
+                or decompressor.unconsumed_tail or len(raw) != expected):
+            raise ValueError("Compressed Marktplaats state is incomplete")
+        restored = json.loads(raw)
+    except (ValueError, zlib.error, UnicodeDecodeError) as exc:
+        raise ValueError("Invalid compressed Marktplaats state") from exc
+    if not isinstance(restored, (dict, list)):
+        raise ValueError("Invalid compressed Marktplaats JSON format")
+    return restored
+
+
 def collect_state(root):
     files = {}
     for name in sorted(STATE_FILES):
         path = Path(root) / name
         if not path.exists():
             continue
-        if not path.is_file() or path.stat().st_size > FILE_LIMIT:
+        limit = MARKTPLAATS_FILE_LIMIT if name.startswith("marktplaats_") else FILE_LIMIT
+        size = path.stat().st_size
+        if not path.is_file() or size > limit:
             raise ValueError("Unbounded/non-file Hunter state cannot be cached")
         with path.open("r", encoding="utf-8") as inp:
             obj = json.load(inp)
         if not isinstance(obj, (dict, list)):
             raise ValueError("Unexpected Hunter state file format")
-        files[name] = obj
+        files[name] = (_pack_marktplaats_state(name, obj)
+                       if name.startswith("marktplaats_") and size > FILE_LIMIT
+                       else obj)
     return {"schema": "aet.hunter.state.v1",
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "files": files}
@@ -158,8 +209,10 @@ def restore_state(root, saved):
         dst = root / name
         if dst.exists():
             raise ValueError("Refusing to overwrite existing private state")
+        restored = _unpack_marktplaats_state(name, data)
         with dst.open("x", encoding="utf-8") as output:
-            json.dump(data, output, ensure_ascii=False, allow_nan=False)
+            json.dump(restored, output, ensure_ascii=False, allow_nan=False,
+                      separators=(",", ":") if restored is not data else None)
 
 
 def encrypted_checkpoint(root, destination, token):
