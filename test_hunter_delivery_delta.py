@@ -93,6 +93,22 @@ class AcknowledgedDeltaTests(unittest.TestCase):
             self.assertEqual(changed["count"], 1)
             self.assertEqual(stats["changed"], 1)
 
+
+    def test_new_only_ignores_price_edits_and_facebook_unchanged(self):
+        with tempfile.TemporaryDirectory() as folder:
+            earlier = candidate(100,price=1400)
+            _, accepted, _ = plan(combined([earlier]),"marktplaats",load(folder))
+            acknowledge(folder,"marktplaats",accepted)
+            updated = candidate(100,price=750)
+            fresh = candidate(101,price=1000)
+            batch, signs, stats = plan(
+                combined([updated,fresh]),"marktplaats",load(folder),new_only=True)
+            self.assertEqual([x["id"] for x in batch["candidates"]],[fresh["id"]])
+            self.assertEqual(stats["new_to_delivery"],1)
+            self.assertEqual(stats["changed"],0)
+            self.assertEqual(stats["repeated"],1)
+            self.assertEqual(set(signs),{fresh["id"]})
+
     def test_facebook_formatting_is_not_silently_normalized(self):
         facebook = {"id": "facebook:111222333", "source": "facebook",
                     "title": "Opel Corsa 1.2", "content_hash": "a"*64}
@@ -345,6 +361,20 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         after = build_payload(feed, known_fingerprints=pending, limit=30)
         self.assertTrue(unknown.issubset(
             {row["id"] for row in after["candidates"]}))
+
+
+    def test_new_only_export_skips_all_previous_ids_before_cap(self):
+        from hunter_pro_export import build_payload
+        rows=[self.raw(i) for i in range(85)]
+        known={"marktplaats:m"+str(10000+i):"a"*64 for i in range(40)}
+        fresh=build_payload({"version":1,"cars":rows},
+                            known_fingerprints=known,limit=50)
+        self.assertEqual(fresh["count"],45)
+        self.assertFalse(set(known) & {x["id"] for x in fresh["candidates"]})
+        all_previously_sent={"marktplaats:m"+str(10000+i):"b"*64 for i in range(85)}
+        empty=build_payload({"version":1,"cars":rows},
+                            known_fingerprints=all_previously_sent,limit=50)
+        self.assertEqual(empty["count"],0)
 
     def test_price_drop_prioritized_and_unchanged_skipped(self):
         from hunter_pro_export import build_payload
