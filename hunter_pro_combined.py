@@ -15,9 +15,9 @@ from hunter_pro_export import build_payload as marktplaats_payload
 SCHEMA="aet-pro.hunter.v2"
 OUTPUT=Path(os.environ.get("AET_HUNTER_STATE_DIR", Path(__file__).resolve().parent))/"hunter_pro_combined.json"
 
-def combine(mp_feed,facebook_feed,now=None,known_mp_fingerprints=None):
+def combine(mp_feed,facebook_feed,now=None,known_mp_fingerprints=None,mp_limit=30):
     now=now or datetime.now(timezone.utc)
-    mp=marktplaats_payload(mp_feed,known_fingerprints=known_mp_fingerprints)
+    mp=marktplaats_payload(mp_feed,known_fingerprints=known_mp_fingerprints,limit=mp_limit)
     if not isinstance(facebook_feed,dict) or not isinstance(facebook_feed.get("candidates"),list):
         raise ValueError("Facebook Hunter feed invalid")
     fb_raw=facebook_feed["candidates"][:30]
@@ -55,12 +55,12 @@ def combine(mp_feed,facebook_feed,now=None,known_mp_fingerprints=None):
         },
         "candidates":items,
     }
-def build(now=None,mp_feed=None,known_mp_fingerprints=None):
+def build(now=None,mp_feed=None,known_mp_fingerprints=None,mp_limit=30):
     from hunter_feed import build as build_mp_feed
     now=now or datetime.now(timezone.utc)
-    return combine(mp_feed if mp_feed is not None else build_mp_feed(now=now),find_candidates(now=now),now=now,known_mp_fingerprints=known_mp_fingerprints)
-def write(path=OUTPUT,now=None,mp_feed=None,known_mp_fingerprints=None):
-    result=build(now=now,mp_feed=mp_feed,known_mp_fingerprints=known_mp_fingerprints)
+    return combine(mp_feed if mp_feed is not None else build_mp_feed(now=now),find_candidates(now=now),now=now,known_mp_fingerprints=known_mp_fingerprints,mp_limit=mp_limit)
+def write(path=OUTPUT,now=None,mp_feed=None,known_mp_fingerprints=None,mp_limit=30):
+    result=build(now=now,mp_feed=mp_feed,known_mp_fingerprints=known_mp_fingerprints,mp_limit=mp_limit)
     destination=Path(path)
     destination.parent.mkdir(parents=True,exist_ok=True)
     temporary=None
