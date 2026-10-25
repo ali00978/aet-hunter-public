@@ -121,6 +121,16 @@ def safe_scan_counters(status):
     return tuple(values)
 
 
+def checkpoint_history_count(checkpoint, platform):
+    """Only return a validated count, never an encrypted-state car identifier."""
+    if platform not in ("marktplaats", "facebook") or not isinstance(checkpoint, dict):
+        raise ValueError("Invalid checkpoint platform")
+    remembered = checkpoint.get(platform)
+    if not isinstance(remembered, dict) or len(remembered) > 3000:
+        raise ValueError("Invalid delivery checkpoint telemetry")
+    return len(remembered)
+
+
 def durable_scan_identity(env):
     """Use GitHub's stable job identity instead of a fresh nanosecond ID.
 
@@ -228,11 +238,8 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         # Count only: the public Actions log must never disclose actual IDs,
         # prices, URLs or seller information. This shows whether encrypted
         # delivery history survived between the scheduled scans.
-        remembered = checkpoint.get(platform)
-        if not isinstance(remembered, dict) or len(remembered) > 3000:
-            raise ValueError("Invalid delivery checkpoint telemetry")
         print(platform + ": eerder_bevestigd_in_historie=" +
-              str(len(remembered)), flush=True)
+              str(checkpoint_history_count(checkpoint, platform)), flush=True)
         broader_mp_feed = None
         previous_mp_signatures = None
         mp_limit = 30
