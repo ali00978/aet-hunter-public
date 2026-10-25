@@ -54,6 +54,8 @@ def envelope(source, run_id, attempt, now=None, combined=None, source_status=Non
     if combined.get("schema") != "aet-pro.hunter.v2" or not isinstance(combined.get("candidates"), list):
         raise ValueError("Invalid combined Hunter export")
     cars = [x["id"] for x in combined["candidates"] if x.get("source") == platform]
+    if len(cars) > (100 if platform == "marktplaats" else 30):
+        raise ValueError("Too many source candidates")
     if len(cars) != len(set(cars)):
         raise ValueError("Duplicate source IDs")
     # An observation is the *set displayed after a completed scan*, not a claim
@@ -83,7 +85,7 @@ def send(payload, endpoint, token):
     if not token or len(token) < 24:
         raise ValueError("AET_HUNTER_SYNC_TOKEN secret must be at least 24 characters")
     body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    if len(body) > 400000:
+    if len(body) > 1800000:
         raise ValueError("Hunter sync payload is too large")
     for attempt in range(3):
         request = Request(endpoint, data=body, method="POST",

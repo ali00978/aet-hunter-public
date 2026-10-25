@@ -856,5 +856,35 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
 
 
+class ReceiverCapacityTests(unittest.TestCase):
+    def test_health_confirmed_100_and_older_versions_fall_back_30(self):
+        endpoint="https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync"
+        class Reply:
+            status=200
+            def __init__(self, body):self.body=body
+            def __enter__(self):return self
+            def __exit__(self,*args):return False
+            def read(self,n):return self.body[:n]
+        class Opener:
+            def __init__(self, info):self.info=info;self.seen=[]
+            def open(self, req, timeout=0):
+                self.seen.append(req.full_url)
+                return Reply(json.dumps(self.info).encode())
+        recent={"status":"ok","database":"connected",
+                "hunter_max_marktplaats_candidates":100}
+        op=Opener(recent)
+        self.assertEqual(runtime.receiver_marktplaats_limit(endpoint,op),100)
+        self.assertEqual(op.seen,["https://aet-cars-pro.eltakech100.workers.dev/api/health"])
+        self.assertEqual(runtime.receiver_marktplaats_limit(endpoint,Opener(
+            {"status":"ok","database":"connected"})),30)
+        self.assertEqual(runtime.receiver_marktplaats_limit(endpoint,Opener(
+            {"status":"ok","database":"connected",
+             "hunter_max_marktplaats_candidates":"100"})),30)
+        self.assertEqual(runtime.receiver_marktplaats_limit("https://evil.invalid",op),30)
+        class Broken:
+            def open(self,*args,**kwargs):raise OSError("offline")
+        self.assertEqual(runtime.receiver_marktplaats_limit(endpoint,Broken()),30)
+
+
 if __name__ == "__main__":
     unittest.main()

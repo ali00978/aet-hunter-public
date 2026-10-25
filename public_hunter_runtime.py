@@ -34,6 +34,40 @@ def require_sync(env):
     return endpoint, token
 
 
+def receiver_marktplaats_limit(endpoint, opener=None):
+    """Negotiate capacity with *our own* AET Pro Worker, never the marketplaces.
+
+    Earlier deployed Workers reject >30. Fail closed to 30 if the harmless
+    public health response is missing, offline, redirected or malformed.
+    """
+    from urllib.request import Request, build_opener, HTTPRedirectHandler
+
+    class NoRedirects(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    if not isinstance(endpoint, str) or not endpoint.endswith(EXPECTED_PATH):
+        return 30
+    health = "https://" + EXPECTED_HOST + "/api/health"
+    opener = opener or build_opener(NoRedirects())
+    try:
+        request = Request(health, headers={"Accept": "application/json"},
+                          method="GET")
+        with opener.open(request, timeout=7) as response:
+            raw = response.read(4097)
+            if response.status != 200 or len(raw) > 4096:
+                return 30
+        data = json.loads(raw.decode("utf-8"))
+        if (isinstance(data, dict) and data.get("status") == "ok"
+                and data.get("database") == "connected"
+                and type(data.get("hunter_max_marktplaats_candidates")) is int
+                and data["hunter_max_marktplaats_candidates"] >= 100):
+            return 100
+    except (OSError, ValueError, TypeError, UnicodeError, RuntimeError):
+        return 30
+    return 30
+
+
 def load_object(path):
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -193,6 +227,7 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         checkpoint = load_delivered(root)
         broader_mp_feed = None
         previous_mp_signatures = None
+        mp_limit = 30
         if platform == "marktplaats":
             # Preserve the original 30-card snapshot/export for existing
             # consumers. The sync selection can inspect 100 already collected
@@ -201,6 +236,8 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             mp_feed = hunter_feed.snapshot()
             hunter_pro_export.write_payload(
                 target=root / "hunter_pro_export.json", feed=mp_feed)
+            mp_limit = receiver_marktplaats_limit(endpoint)
+            print("marktplaats: ontvangercapaciteit=" + str(mp_limit), flush=True)
             broader_mp_feed = hunter_feed.build(now=now, limit=100)
             previous_mp_signatures = checkpoint["marktplaats"]
         # Always write inside the PRIVATE temp state directory. Calling
@@ -209,7 +246,8 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         combined = hunter_pro_combined.write(
             path=root / "hunter_pro_combined.json", now=now,
             mp_feed=broader_mp_feed,
-            known_mp_fingerprints=previous_mp_signatures)
+            known_mp_fingerprints=previous_mp_signatures,
+            mp_limit=mp_limit)
         persist()
         # Full research archive is not the same as newly discovered ads.
         # Compare against ONLY confirmed prior deliveries; failed syncs must
