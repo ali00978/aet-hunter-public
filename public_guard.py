@@ -33,6 +33,7 @@ ALLOW = {
     "hunter_feed.py", "hunter_pro_export.py", "hunter_pro_combined.py",
     "hunter_sync.py", "public_apify_collector.py", "public_hunter_runtime.py",
     "test_public_hunter_runtime.py", "ops/modal/public_hunter_modal.py",
+    "hunter_delivery_delta.py", "test_hunter_delivery_delta.py",
     "PUBLIC_STANDALONE_SETUP.md",
     "ops/github/standalone_hunter_runner.py", "test_github_standalone.py",
     "ops/github/facebook_live_once.py", "test_facebook_live_once.py",

@@ -43,6 +43,7 @@ STATE_FILES = frozenset((
     "hunter_feed.json",
     "hunter_pro_export.json",
     "hunter_pro_combined.json",
+    "hunter_delivery_checkpoint.json",
     "apify_budget.json",
     "apify_backoff.json",
     "apify_retry_once.json",
