@@ -225,6 +225,14 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         # candidates ranked 31-100 by the existing offline quality filter.
         from hunter_delivery_delta import load as load_delivered, plan, acknowledge
         checkpoint = load_delivered(root)
+        # Count only: the public Actions log must never disclose actual IDs,
+        # prices, URLs or seller information. This shows whether encrypted
+        # delivery history survived between the scheduled scans.
+        remembered = checkpoint.get(platform)
+        if not isinstance(remembered, dict) or len(remembered) > 3000:
+            raise ValueError("Invalid delivery checkpoint telemetry")
+        print(platform + ": eerder_bevestigd_in_historie=" +
+              str(len(remembered)), flush=True)
         broader_mp_feed = None
         previous_mp_signatures = None
         mp_limit = 30
