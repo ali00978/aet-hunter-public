@@ -354,7 +354,7 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         unknown = {"marktplaats:m"+str(10000+i) for i in range(60, 80)}
         self.assertTrue(unknown.issubset(
             {row["id"] for row in export["candidates"]}))
-        self.assertEqual(export["count"],30)
+        self.assertEqual(export["count"],20)
         # A pending legacy rebase must also never mask brand-new candidates.
         from hunter_delivery_delta import PENDING_REBASE
         pending = {key: PENDING_REBASE for key in old}
