@@ -62,7 +62,7 @@ def plan(combined, platform, recorded):
         raise ValueError("Invalid combined Hunter export")
     previous = recorded[platform]
     items = [x for x in combined["candidates"] if x.get("source") == platform]
-    if len(items) > 30 or len({x.get("id") for x in items}) != len(items):
+    if len(items) > (100 if platform == "marktplaats" else 30) or len({x.get("id") for x in items}) != len(items):
         raise ValueError("Too many or duplicated Hunter advertisements")
     changed, signatures, first, revised = [], {}, 0, 0
     for item in items:
