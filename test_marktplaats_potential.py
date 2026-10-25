@@ -70,5 +70,73 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(len(output),30)
         self.assertEqual({r['potential_category'] for r in output},
                          {'vaste_prijs','klein_herstel','prijs_opvragen','zoekkaart'})
+    def test_trade_margin_overrides_fake_cheapness_and_is_not_guaranteed_profit(self):
+        # Cheaper than comparable asking prices does not necessarily cover
+        # transport, repairs and resale haircut. No actual marketplace calls.
+        compar={'status':'indicatieve_vraagprijzen','sample_size':6,
+                'median_asking_price_eur':4000,'high_price_dispersion':False}
+        strong=self.car(9001,price=1200,market_comparison=compar,
+                        estimated_costs_allowance_eur=450)
+        weak=self.car(9002,price=2600,market_comparison=compar,
+                      estimated_costs_allowance_eur=450)
+        result=select_potential_candidates([weak,strong],[],now=self.now)
+        self.assertEqual([x['url'] for x in result],[strong['url'],weak['url']])
+        self.assertEqual(result[0]['potential_trade_tier'],'sterke_marge_na_controle')
+        self.assertEqual(result[1]['potential_trade_tier'],'marge_onvoldoende')
+        self.assertLess(result[1]['potential_net_margin_eur'],
+                        result[1]['potential_target_margin_eur'])
+        self.assertTrue(any('geen bevestigde verkoopprijs of winst' in x
+                            for x in result[0]['potential_notes']))
+        self.assertTrue(any('biedgrens' in x for x in result[1]['potential_notes']))
+
+    def test_more_profit_required_on_a_2500_euro_purchase(self):
+        compar={'status':'indicatieve_vraagprijzen','sample_size':5,
+                'median_asking_price_eur':4300,'high_price_dispersion':False}
+        car=self.car(9003,price=2500,market_comparison=compar,
+                     estimated_costs_allowance_eur=450)
+        result=select_potential_candidates([car],[],now=self.now)[0]
+        self.assertEqual(result['potential_target_margin_eur'],750)
+        self.assertEqual(result['potential_net_margin_eur'],705)
+        self.assertEqual(result['potential_trade_tier'],'marge_onvoldoende')
+
+    def test_missing_or_bad_comparisons_never_fake_profit(self):
+        cases=[
+            self.car(9010),
+            self.car(9011,market_comparison={'status':'indicatieve_vraagprijzen',
+                'sample_size':2,'median_asking_price_eur':3000}),
+            self.car(9012,market_comparison={'status':'indicatieve_vraagprijzen',
+                'sample_size':5,'median_asking_price_eur':3000,
+                'high_price_dispersion':True}),
+        ]
+        for item in select_potential_candidates(cases,[],now=self.now):
+            self.assertIsNone(item['potential_net_margin_eur'])
+            self.assertNotEqual(item['potential_trade_tier'],'sterke_marge_na_controle')
+
+    def test_repair_or_unchecked_card_is_not_top_tier_despite_high_margin(self):
+        compar={'status':'indicatieve_vraagprijzen','sample_size':5,
+                'median_asking_price_eur':4000,'high_price_dispersion':False}
+        repair=self.car(9030,price=600,market_comparison=compar,
+                        description='Airco werkt niet, verder goed onderhouden. '*10)
+        unchecked=self.car(9031,price=700,market_comparison=compar,
+                           not_rechecked_this_run=True)
+        output=select_potential_candidates([repair,unchecked],[],now=self.now)
+        categories={x['url']:x for x in output}
+        self.assertEqual(categories[repair['url']]['potential_category'],'klein_herstel')
+        self.assertNotEqual(categories[repair['url']]['potential_trade_tier'],
+                            'sterke_marge_na_controle')
+        self.assertNotEqual(categories[unchecked['url']]['potential_trade_tier'],
+                            'sterke_marge_na_controle')
+
+    def test_strong_repair_research_is_sorted_before_weak_fixed_price(self):
+        compar={'status':'indicatieve_vraagprijzen','sample_size':5,
+                'median_asking_price_eur':3500,'high_price_dispersion':False}
+        good=self.car(9041,price=850,market_comparison=compar,
+                      estimated_costs_allowance_eur=400)
+        poor=self.car(9042,price=2700,market_comparison=compar,
+                      estimated_costs_allowance_eur=400)
+        result=select_potential_candidates([poor,good],[],now=self.now)
+        self.assertEqual(result[0]['url'],good['url'])
+        self.assertEqual([r['potential_rank'] for r in result],[1,2])
+
 if __name__=='__main__':
     unittest.main()
