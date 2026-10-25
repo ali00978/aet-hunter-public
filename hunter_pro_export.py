@@ -82,8 +82,8 @@ def candidate(row,archive=False):
     result["content_hash"]=hashlib.sha256(json.dumps(stable,sort_keys=True,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode()).hexdigest()
     return result
 def build_payload(feed, known_fingerprints=None, limit=30):
-    """Select up to 100 unique already-scanned vehicles for the combined export.
-    Legacy standalone v1 exports remain capped at 30 by default. No provider calls."""
+    """Choose up to 100 unique vehicles from at most 300 locally saved cars.
+    Legacy standalone v1 exports stay capped at 30. No provider calls."""
     if not isinstance(feed,dict) or feed.get("version")!=1 or not isinstance(feed.get("cars"),list):
         raise ValueError("Onbekende of ongeldige Hunter-feed")
     if known_fingerprints is not None and not isinstance(known_fingerprints,dict):
@@ -91,7 +91,7 @@ def build_payload(feed, known_fingerprints=None, limit=30):
     if type(limit) is not int or not 1<=limit<=100:
         raise ValueError("Maximaal 100 onderzoeksadvertenties per bron")
     entries=[];seen=set()
-    for row in feed["cars"][:100]:
+    for row in feed["cars"][:300]:
         item=candidate(row,bool(feed.get("archived")))
         if item is not None and item["id"] not in seen:
             entries.append(item);seen.add(item["id"])

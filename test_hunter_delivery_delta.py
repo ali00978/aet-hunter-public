@@ -413,5 +413,51 @@ class HundredCandidateHandoffTests(unittest.TestCase):
             plan(packet,"marktplaats",{"marktplaats":{},"facebook":{}})
 
 
+class RotatingThreeHundredPoolTests(unittest.TestCase):
+    """No provider requests: previously saved cars ranked 101-300 get a turn."""
+
+    def test_acknowledged_hundred_does_not_starve_next_two_hundred(self):
+        from hunter_pro_export import build_payload
+        rows = [BroaderOfflineCandidateSelectionTests.raw(i) for i in range(250)]
+        feed = {"version": 1, "cars": rows}
+        delivered_ids = set()
+        with tempfile.TemporaryDirectory() as root:
+            for expected in (100, 100, 50, 0):
+                checkpoint = load(root)
+                # 100 remains the maximum outbound capacity of A.E.T Pro;
+                # the separate offline input pool may contain 300.
+                export = build_payload(
+                    feed, known_fingerprints=checkpoint["marktplaats"],
+                    limit=100)
+                self.assertLessEqual(export["count"], 100)
+                scoped, signatures, counters = plan(
+                    combined(export["candidates"]), "marktplaats", checkpoint)
+                self.assertEqual(scoped["count"], expected)
+                self.assertEqual(counters["new_to_delivery"], expected)
+                ids = {row["id"] for row in scoped["candidates"]}
+                self.assertFalse(delivered_ids & ids,
+                                 "Old cars must not be presented as new")
+                delivered_ids.update(ids)
+                # Acknowledge only after the Worker would have confirmed.
+                acknowledge(root, "marktplaats", signatures)
+        self.assertEqual(len(delivered_ids), 250)
+
+    def test_default_thirty_and_export_hard_maximum_remain_unchanged(self):
+        from hunter_pro_export import build_payload
+        feed = {"version": 1, "cars": [
+            BroaderOfflineCandidateSelectionTests.raw(i) for i in range(360)]}
+        self.assertEqual(build_payload(feed)["count"], 30)
+        self.assertEqual(build_payload(feed, limit=100)["count"], 100)
+        with self.assertRaises(ValueError):
+            build_payload(feed, limit=101)
+        # Only the already collected first 300 can enter selection; no
+        # extra requests or unbounded memory/deep backlog scans.
+        first300 = {"marktplaats:m" + str(10000+i) for i in range(300)}
+        known = {key: "a"*64 for key in first300}
+        later = build_payload(feed, known_fingerprints=known, limit=100)
+        self.assertTrue({row["id"] for row in later["candidates"]}
+                        .issubset(first300))
+
+
 if __name__ == "__main__":
     unittest.main()

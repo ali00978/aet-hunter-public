@@ -231,8 +231,8 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             return "unhealthy"
         now = datetime.now(timezone.utc)
         # Load only acknowledged deliveries, BEFORE choosing the next 30
-        # records. An unchanged top 30 must never conceal newly discovered
-        # candidates ranked 31-100 by the existing offline quality filter.
+        # records. Already acknowledged top-100 ads must not conceal new cars
+        # in positions 101-300 of the existing offline research archive.
         from hunter_delivery_delta import load as load_delivered, plan, acknowledge
         checkpoint = load_delivered(root)
         # Count only: the public Actions log must never disclose actual IDs,
@@ -253,7 +253,7 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                 target=root / "hunter_pro_export.json", feed=mp_feed)
             mp_limit = receiver_marktplaats_limit(endpoint)
             print("marktplaats: ontvangercapaciteit=" + str(mp_limit), flush=True)
-            broader_mp_feed = hunter_feed.build(now=now, limit=100)
+            broader_mp_feed = hunter_feed.build(now=now, limit=300)
             previous_mp_signatures = checkpoint["marktplaats"]
         # Always write inside the PRIVATE temp state directory. Calling
         # write(now=now) would use the module's import-time default OUTPUT,
