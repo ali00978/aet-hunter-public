@@ -81,19 +81,21 @@ def candidate(row,archive=False):
     stable={k:v for k,v in result.items() if k not in ("rank","url")}
     result["content_hash"]=hashlib.sha256(json.dumps(stable,sort_keys=True,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode()).hexdigest()
     return result
-def build_payload(feed, known_fingerprints=None):
-    """Keep a 30-car v1 export; with private confirmed history, prefer changed
-    candidates from the already-scanned top 100. No new provider calls."""
+def build_payload(feed, known_fingerprints=None, limit=30):
+    """Select up to 100 unique already-scanned vehicles for the combined export.
+    Legacy standalone v1 exports remain capped at 30 by default. No provider calls."""
     if not isinstance(feed,dict) or feed.get("version")!=1 or not isinstance(feed.get("cars"),list):
         raise ValueError("Onbekende of ongeldige Hunter-feed")
     if known_fingerprints is not None and not isinstance(known_fingerprints,dict):
         raise ValueError("Ongeldige privégeschiedenis voor selectie")
+    if type(limit) is not int or not 1<=limit<=100:
+        raise ValueError("Maximaal 100 onderzoeksadvertenties per bron")
     entries=[];seen=set()
     for row in feed["cars"][:100]:
         item=candidate(row,bool(feed.get("archived")))
         if item is not None and item["id"] not in seen:
             entries.append(item);seen.add(item["id"])
-        if len(entries)>=30 and known_fingerprints is None:break
+        if len(entries)>=limit and known_fingerprints is None:break
     if known_fingerprints is not None:
         from hunter_delivery_delta import fingerprint
         # Stable Python sort retains the underlying quality rank within each
@@ -101,7 +103,7 @@ def build_payload(feed, known_fingerprints=None):
         # unchanged listings retain their ranking and are filtered downstream.
         entries.sort(key=lambda item:
                      known_fingerprints.get(item["id"]) == fingerprint(item))
-    entries=entries[:30]
+    entries=entries[:limit]
     revision=hashlib.sha256(json.dumps(sorted((x["id"],x["content_hash"]) for x in entries),separators=(",",":")).encode()).hexdigest()
     return {"schema":FORMAT,"source":"aet-cars-ai-hunter","integration_mode":"offline_export_no_upload",
             "scan_checked_at":date(feed.get("scan_checked_at")),
