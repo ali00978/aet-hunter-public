@@ -267,6 +267,30 @@ class HunterTests(unittest.TestCase):
         item['severe_technical_risk'] = True
         self.assertEqual(buying_opportunity(item)['buyer_queue'], 'reparatieproject')
 
+    def test_new_delivery_cars_replace_old_detail_rechecks_without_extra_requests(self):
+        from scanner import prioritize_undelivered_purchase_details
+        from datetime import datetime, timezone
+        now=datetime(2026,10,26,tzinfo=timezone.utc).timestamp()
+        def link(i):
+            return ("https://www.marktplaats.nl/v/auto-s/opel/m"
+                    +str(90000+i)+"-test")
+        previous=[link(i) for i in range(4)]
+        newly_seen=[link(i) for i in range(4,9)]
+        selected=previous+[newly_seen[0]]
+        groups=[previous+newly_seen]
+        facts={u:{"price_type":"FIXED","price":850,
+                  "seller_type":"particulier"} for u in selected+newly_seen}
+        result, added=prioritize_undelivered_purchase_details(
+            selected,groups,{}, {}, now, facts,
+            {u.rsplit("/",1)[-1].split("-")[0] for u in previous},
+            5,priorities={u:(0,850) for u in facts})
+        self.assertEqual(len(result),5)
+        self.assertEqual(len({x.rsplit("/",1)[-1].split("-")[0] for x in result}),5)
+        self.assertEqual(result[:4],newly_seen[:4])
+        self.assertGreaterEqual(added,3)
+        self.assertEqual(prioritize_undelivered_purchase_details(
+            selected,groups,{}, {}, now, facts,set(),5)[0],selected)
+
     def test_detail_budget_is_fairly_spread_across_models(self):
         groups = [['a1', 'a2', 'a3', 'a4', 'a5'],
                   ['b1', 'b2', 'b3'], ['c1', 'c2', 'c3']]
