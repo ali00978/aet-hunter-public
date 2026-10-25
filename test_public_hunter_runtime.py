@@ -404,6 +404,107 @@ class StandaloneRuntimeTests(unittest.TestCase):
                              ["count"], 1)
 
 
+
+    def test_fifty_distinct_new_only_ads_split_at_legacy_receiver_limit(self):
+        """50 genuinely unseen ads means 30+20, then 20, then zero; never updates."""
+        import scanner
+        import hunter_feed
+        import hunter_sync
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            env = {
+                "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+                "AET_PRO_SYNC_URL":
+                    "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                "AET_HUNTER_SYNC_TOKEN": "x" * 26,
+                "AET_HUNTER_STATE_DIR": folder,
+                "GITHUB_RUN_ID": "123456789",
+                "GITHUB_RUN_ATTEMPT": "1",
+            }
+            records = [{
+                "url": "https://www.marktplaats.nl/v/auto-s/opel/m"
+                       + str(87654000 + n) + "-corsa-test",
+                "title": "TEST Opel Corsa 2012 " + str(n),
+                "seller_type": "particulier", "price_type": "FIXED",
+                "price": 850 + n, "year": 2012, "mileage_km": 160000,
+                "checked_at": now.isoformat(),
+                "potential_category": "vaste_prijs",
+            } for n in range(70)]
+            feed = {"version": 1, "generated_at": now.isoformat(),
+                    "scan_checked_at": now.isoformat(), "archived": False,
+                    "count": len(records), "cars": records}
+            sent = []
+            def scan():
+                (root / "marktplaats_status.json").write_text(json.dumps({
+                    "checked_at": now.isoformat(), "scan_health": "ok"}))
+            def send(packet, *_):
+                sent.append(packet)
+                return {"received": True}
+            with (patch.object(scanner, "main", side_effect=scan),
+                  patch.object(hunter_feed, "build", return_value=feed),
+                  patch.object(runtime, "receiver_marktplaats_limit", return_value=30),
+                  patch.object(hunter_sync, "send", side_effect=send)):
+                self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
+                self.assertEqual([len(x["scan"]["candidate_ids"]) for x in sent],
+                                 [30, 20])
+                self.assertEqual(len({id_ for packet in sent
+                    for id_ in packet["scan"]["candidate_ids"]}), 50)
+                self.assertNotEqual(sent[0]["scan"]["id"], sent[1]["scan"]["id"])
+                first = {id_ for packet in sent
+                         for id_ in packet["scan"]["candidate_ids"]}
+                sent.clear()
+                records[0]["price"] = 450  # prior ad is UPDATED, not new
+                self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
+                self.assertEqual([len(x["scan"]["candidate_ids"]) for x in sent], [20])
+                second = set(sent[0]["scan"]["candidate_ids"])
+                self.assertFalse(first & second)
+                sent.clear()
+                self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
+                self.assertEqual([len(x["scan"]["candidate_ids"]) for x in sent], [0])
+
+    def test_partial_batch_failure_retains_first_batch_without_duplicates(self):
+        import scanner
+        import hunter_feed
+        import hunter_sync
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            env = {"AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+                   "AET_PRO_SYNC_URL":
+                       "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                   "AET_HUNTER_SYNC_TOKEN": "x"*26,
+                   "AET_HUNTER_STATE_DIR": folder}
+            items = [{"url": "https://www.marktplaats.nl/v/auto-s/opel/m"
+                      + str(65432000+n) + "-test",
+                      "title": "TEST Opel Corsa", "seller_type": "particulier",
+                      "price_type": "FIXED", "price": 700+n,
+                      "year": 2010, "mileage_km": 180000,
+                      "checked_at": now.isoformat()} for n in range(50)]
+            feed = {"version": 1, "generated_at": now.isoformat(),
+                    "scan_checked_at": now.isoformat(), "cars": items}
+            attempts = []
+            def scan():
+                (root/"marktplaats_status.json").write_text(json.dumps({
+                    "checked_at": now.isoformat(), "scan_health": "ok"}))
+            def failing_send(packet, *_):
+                attempts.append(packet)
+                if len(attempts) == 2:
+                    raise RuntimeError("Receiver temporarily failed")
+                return {"received": True}
+            with (patch.object(scanner, "main", side_effect=scan),
+                  patch.object(hunter_feed, "build", return_value=feed),
+                  patch.object(runtime, "receiver_marktplaats_limit", return_value=30),
+                  patch.object(hunter_sync, "send", side_effect=failing_send)):
+                with self.assertRaisesRegex(RuntimeError, "temporarily failed"):
+                    runtime.run_platform("marktplaats", env=env)
+                self.assertEqual(len(__import__('hunter_delivery_delta').load(root)["marktplaats"]), 30)
+                accepted = set(attempts[0]["scan"]["candidate_ids"])
+                attempts.clear()
+                self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
+                self.assertFalse(accepted & set(attempts[0]["scan"]["candidate_ids"]))
+                self.assertEqual(len(attempts[0]["scan"]["candidate_ids"]), 20)
+
     def test_facebook_provider_snapshot_to_aet_pro_batch_without_network(self):
         import hunter_sync
         import hunter_feed

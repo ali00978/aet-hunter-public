@@ -107,7 +107,7 @@ def load(root):
     return data
 
 
-def plan(combined, platform, recorded):
+def plan(combined, platform, recorded, *, new_only=False):
     if platform not in PLATFORMS:
         raise ValueError("Unknown Hunter platform")
     if (not isinstance(combined, dict) or combined.get("schema") != "aet-pro.hunter.v2"
@@ -130,6 +130,11 @@ def plan(combined, platform, recorded):
     changed, signatures, first, revised = [], {}, 0, 0
     for item in items:
         key = item["id"]
+        # Never present an already confirmed Marktplaats ad as a NEW offer.
+        # Repricing/rewording stays visible in historical research, not in the
+        # new-discovery inbox. Facebook retains its existing delta semantics.
+        if new_only and platform == "marktplaats" and key in previous:
+            continue
         sig = fingerprint(item)
         signatures[key] = sig
         previous_sig = previous.get(key)

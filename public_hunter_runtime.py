@@ -252,7 +252,8 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             hunter_pro_export.write_payload(
                 target=root / "hunter_pro_export.json", feed=mp_feed)
             mp_limit = receiver_marktplaats_limit(endpoint)
-            print("marktplaats: ontvangercapaciteit=" + str(mp_limit), flush=True)
+            print("marktplaats: ontvangercapaciteit_per_batch=" + str(mp_limit),
+                  ", doel_nieuwe_autos=50", flush=True)
             broader_mp_feed = hunter_feed.build(now=now, limit=300)
             if broader_mp_feed.get("archived"):
                 # An empty healthy scan can fall back to previously saved
@@ -270,27 +271,58 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             path=root / "hunter_pro_combined.json", now=now,
             mp_feed=broader_mp_feed,
             known_mp_fingerprints=previous_mp_signatures,
-            mp_limit=mp_limit)
+            mp_limit=50 if platform == "marktplaats" else mp_limit)
         persist()
         # Full research archive is not the same as newly discovered ads.
         # Compare against ONLY confirmed prior deliveries; failed syncs must
         # be retried instead of quietly losing potential opportunities.
-        scoped, signatures, changes = plan(combined, platform, checkpoint)
+        scoped, signatures, changes = plan(
+            combined, platform, checkpoint,
+            new_only=(platform == "marktplaats"))
         print(platform + ": bekeken_in_export=" + str(changes["observed"]) +
               ", nieuw=" + str(changes["new_to_delivery"]) +
               ", inhoudelijk_gewijzigd=" + str(changes["changed"]) +
               ", herhaald_overgeslagen=" + str(changes["repeated"]), flush=True)
         run_id, attempt = durable_scan_identity(env)
-        package = hunter_sync.envelope(
-            source, run_id, attempt, now=now,
-            combined=scoped, source_status=status)
-        # No candidate URLs, details, credentials, or endpoint responses logged.
-        answer = hunter_sync.send(package, endpoint, token)
-        if answer.get("received") is not True:
-            raise RuntimeError("AET Pro did not confirm receipt")
-        acknowledge(root, platform, signatures, persist)
-        print(platform + ": synced; candidates=" +
-              str(len(package["scan"]["candidate_ids"])))
+        # A currently deployed Worker may accept only 30 per request. Deliver
+        # up to 50 ACTUALLY unseen Marktplaats ads in independent, bounded
+        # batches (30+20) rather than claiming 50 while quietly truncating.
+        # Each batch gets a stable id and its own durable acknowledgement.
+        # On partial failure already accepted cars remain remembered; the
+        # unsent tail is retried on the next scan, never marked as delivered.
+        import hashlib
+        candidates = scoped["candidates"]
+        per_batch = mp_limit if platform == "marktplaats" else 30
+        chunks = [candidates[i:i + per_batch]
+                  for i in range(0, len(candidates), per_batch)] or [[]]
+        total_sent = 0
+        for index, chunk in enumerate(chunks):
+            batch = dict(scoped)
+            batch["candidates"] = chunk
+            batch["count"] = len(chunk)
+            batch["platform_counts"] = {
+                "marktplaats": len(chunk) if platform == "marktplaats" else 0,
+                "facebook": len(chunk) if platform == "facebook" else 0,
+            }
+            batch["revision"] = hashlib.sha256(json.dumps(
+                sorted((car["id"], car["content_hash"]) for car in chunk),
+                separators=(",", ":")).encode("utf-8")).hexdigest()
+            # The first batch preserves the existing stable ID for backwards
+            # compatibility. A second one has a distinct deterministic ID.
+            chunk_id = run_id if index == 0 else run_id + "0" + str(index)
+            package = hunter_sync.envelope(
+                source, chunk_id, attempt, now=now,
+                combined=batch, source_status=status)
+            # Never log raw URLs, offers, credentials or Worker responses.
+            answer = hunter_sync.send(package, endpoint, token)
+            if answer.get("received") is not True:
+                raise RuntimeError("AET Pro did not confirm receipt")
+            acknowledge(root, platform,
+                        {car["id"]: signatures[car["id"]] for car in chunk},
+                        persist)
+            total_sent += len(chunk)
+        print(platform + ": synced; nieuwe_kandidaten=" + str(total_sent) +
+              ", batches=" + str(len(chunks)), flush=True)
         return "synced"
     finally:
         os.chdir(cwd)

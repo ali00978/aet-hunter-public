@@ -97,19 +97,12 @@ def build_payload(feed, known_fingerprints=None, limit=30):
             entries.append(item);seen.add(item["id"])
         if len(entries)>=limit and known_fingerprints is None:break
     if known_fingerprints is not None:
-        from hunter_delivery_delta import fingerprint, PENDING_REBASE
-        # Preserve source quality ranking *within* groups, but prefer genuine
-        # NEVER-DELIVERED adverts over changed adverts and acknowledged old
-        # adverts. This also protects new ads during the one-time fingerprint
-        # migration, when historic market-sensitive digests all differ.
-        def delivery_priority(item):
-            old = known_fingerprints.get(item["id"])
-            if old is None:
-                return 0  # genuinely new ID
-            if old == PENDING_REBASE or old == fingerprint(item):
-                return 2  # unchanged / safely pending first rebase
-            return 1  # materially changed (or old format still migrating)
-        entries.sort(key=delivery_priority)
+        # STRICT NEW-ONLY mode for private outbound Hunter batches. Once an
+        # ID has been accepted, even its price drop is NOT a new advertisement.
+        # The 30-card legacy research export stays unchanged (history=None).
+        # Inspect all 300 saved rows first, otherwise repeated top-ranked cars
+        # hide still-unseen candidates deeper in the existing offline pool.
+        entries = [item for item in entries if item["id"] not in known_fingerprints]
     entries=entries[:limit]
     revision=hashlib.sha256(json.dumps(sorted((x["id"],x["content_hash"]) for x in entries),separators=(",",":")).encode()).hexdigest()
     return {"schema":FORMAT,"source":"aet-cars-ai-hunter","integration_mode":"offline_export_no_upload",
