@@ -33,6 +33,7 @@ REPAIR_NOTE_PREFIXES = (
 # EUR 100 comparison-price bands oscillate with different reference samples.
 # Use an acknowledged-only one-time migration when upgrading existing hashes.
 FINGERPRINT_REVISION = 2
+PENDING_REBASE = "0" * 64  # impossible normal SHA-256; private state sentinel
 
 BUSINESS_FIELDS = (
     "id", "source", "title", "year", "mileage_km",
@@ -134,7 +135,8 @@ def plan(combined, platform, recorded):
         previous_sig = previous.get(key)
         if previous_sig == sig or (
                 platform == "marktplaats" and previous_sig is not None
-                and (upgrading or previous_sig == fingerprint(item, legacy=True))):
+                and (upgrading or previous_sig == PENDING_REBASE or
+                     previous_sig == fingerprint(item, legacy=True))):
             # Silently upgrade an unchanged older checkpoint to the new
             # normalized signature AFTER the Worker acknowledges the scan.
             continue
@@ -165,10 +167,17 @@ def acknowledge(root, platform, signatures, persist=lambda: None):
         raise ValueError("Invalid Hunter checkpoint update")
     state = load(root)
     merged = dict(state[platform])
+    if (platform == "marktplaats" and
+            state.get("marktplaats_fingerprint_revision", 1) != FINGERPRINT_REVISION):
+        # All earlier acknowledged IDs must be rebased lazily, including
+        # vehicles currently outside the top 100. Store a validated sentinel
+        # for unseen IDs, otherwise they would appear as a false "change" the
+        # first time they resurface weeks later.
+        merged = {key: PENDING_REBASE for key in merged}
     merged.update(signatures)
     if platform == "marktplaats":
-        # The marker and all updated signatures must be written atomically
-        # to the same encrypted private checkpoint, only after a valid ACK.
+        # The marker, pending IDs and updated signatures share ONE atomic
+        # private checkpoint; only a verified AET Pro receipt advances it.
         state["marktplaats_fingerprint_revision"] = FINGERPRINT_REVISION
     # Old ads remain remembered to prevent resurfacing without meaningful
     # changes. Bound encrypted-cache growth independently for each platform.
