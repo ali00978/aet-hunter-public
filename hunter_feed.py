@@ -28,7 +28,7 @@ def _time(value):
     except (TypeError, ValueError, OverflowError):
         return None
 
-def build(now=None, max_price=3000):
+def build(now=None, max_price=3000, limit=30):
     now = now or datetime.now(timezone.utc)
     one, two, state = _json(RESEARCH), _json(SEARCH), _json(STATUS)
     research = one if isinstance(one, list) else []
@@ -40,7 +40,7 @@ def build(now=None, max_price=3000):
                          'count': len(data) if isinstance(data, list) else 0,
                          'valid': isinstance(data, list)}
     current = select_potential_candidates(research, search, max_price=max_price,
-                                          limit=30, now=now)
+                                          limit=limit, now=now)
     archived = False
     checked = _time(state.get('checked_at'))
     if not current:
@@ -51,7 +51,7 @@ def build(now=None, max_price=3000):
         latest = max((s for s in stamps if s is not None), default=None)
         if latest is not None:
             current = select_potential_candidates(
-                research, search, max_price=max_price, limit=30,
+                research, search, max_price=max_price, limit=limit,
                 now=latest + timedelta(minutes=1))
             archived = bool(current)
     # No values are recomputed: the scanner's margins and strict shortlist
