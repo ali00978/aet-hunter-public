@@ -129,6 +129,31 @@ class AcknowledgedDeltaTests(unittest.TestCase):
             self.assertEqual(load(tmp)["marktplaats"]["marktplaats:m101"],
                              fingerprint(candidate(101)))
 
+    def test_recently_rechecked_old_car_stays_known_after_3000_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = load(tmp)
+            state["marktplaats"] = {
+                candidate(i)["id"]: fingerprint(candidate(i))
+                for i in range(3000)
+            }
+            (Path(tmp) / FILE).write_text(json.dumps(state))
+            early_id = candidate(1)["id"]
+            # Car #1 is still for sale and was just observed again; adding
+            # another car must evict the oldest *unseen* ID, not the active one.
+            acknowledge(tmp, "marktplaats", {
+                early_id: fingerprint(candidate(1)),
+                candidate(3000)["id"]: fingerprint(candidate(3000)),
+            })
+            refreshed = load(tmp)
+            self.assertEqual(len(refreshed["marktplaats"]), 3000)
+            self.assertIn(early_id, refreshed["marktplaats"])
+            self.assertIn(candidate(3000)["id"], refreshed["marktplaats"])
+            self.assertNotIn(candidate(0)["id"], refreshed["marktplaats"])
+            unchanged, _, stats = plan(
+                combined([candidate(1)]), "marktplaats", refreshed)
+            self.assertEqual(unchanged["count"], 0)
+            self.assertEqual(stats["repeated"], 1)
+
     def test_cross_platform_independent_and_corrupt_checkpoint_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             fb={"id":"facebook:234567890","source":"facebook",
