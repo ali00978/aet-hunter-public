@@ -107,6 +107,24 @@ def send(payload, endpoint, token):
                     raise ValueError("AET Pro sync receipt is not valid JSON") from None
                 if not isinstance(answer, dict) or answer.get("received") is not True:
                     raise ValueError("AET PRO did not confirm synchronization")
+                # Legacy <=30-car receipts only say received=true. Larger
+                # batches need explicit proof all records were accepted;
+                # otherwise an old Worker could silently drop cars 31-100.
+                scan = payload.get("scan") if isinstance(payload, dict) else None
+                identifiers = scan.get("candidate_ids") if isinstance(scan, dict) else None
+                expected = len(identifiers) if isinstance(identifiers, list) else 0
+                acknowledged = answer.get("accepted_candidate_count")
+                if acknowledged is not None and (type(acknowledged) is not int
+                        or acknowledged != expected):
+                    raise ValueError("AET Pro acknowledged a different candidate count")
+                receipt_id = answer.get("scan_id")
+                if receipt_id is not None and (not isinstance(scan, dict)
+                        or receipt_id != scan.get("id")):
+                    raise ValueError("AET Pro acknowledged a different scan")
+                if expected > 30 and (type(acknowledged) is not int
+                        or not isinstance(receipt_id, str)
+                        or receipt_id != scan.get("id")):
+                    raise ValueError("AET Pro must confirm all >30 candidates explicitly")
                 return answer
         except HTTPError as error:
             if error.code not in (429, 502, 503, 504) or attempt == 2:

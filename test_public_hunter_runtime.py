@@ -102,6 +102,63 @@ class StandaloneRuntimeTests(unittest.TestCase):
                         with self.assertRaises(ValueError):
                             hunter_sync.send({"test":True},endpoint,token)
 
+    def test_hundred_car_receipt_must_match_scan_and_exact_count(self):
+        """A 100-capable Worker may not silently retain only the old 30."""
+        import hunter_sync
+        import json
+        endpoint = ("https://aet-cars-pro.eltakech100.workers.dev"
+                    "/api/integrations/hunter/sync")
+        token = "x" * 26
+        scan_id = "marktplaats:12345:1"
+        def packet(n):
+            return {"scan": {"id": scan_id,
+                             "candidate_ids": ["marktplaats:m"+str(i)
+                                               for i in range(n)]}}
+        class Reply:
+            status = 200
+            def __init__(self, body): self.body = json.dumps(body).encode()
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, n): return self.body[:n]
+        class Opener:
+            def __init__(self, body): self.body = body
+            def open(self, request, timeout=20):
+                return Reply(self.body)
+        success = {"received": True, "scan_id": scan_id,
+                   "accepted_candidate_count": 100}
+        with patch.object(hunter_sync, "build_opener",
+                          return_value=Opener(success)):
+            self.assertEqual(hunter_sync.send(packet(100), endpoint, token),
+                             success)
+        # Existing deployed Workers remain compatible with small batches.
+        with patch.object(hunter_sync, "build_opener",
+                          return_value=Opener({"received": True})):
+            self.assertTrue(hunter_sync.send(packet(30), endpoint, token)
+                            ["received"])
+        rejected = [
+            {"received": True},
+            {"received": True, "count": 100},
+            {"received": True, "scan_id": scan_id,
+             "accepted_candidate_count": 30},
+            {"received": True, "scan_id": scan_id,
+             "accepted_candidate_count": "100"},
+            {"received": True, "scan_id": "wrong",
+             "accepted_candidate_count": 100},
+            {"received": True, "accepted_candidate_count": 100},
+        ]
+        for body in rejected:
+            with self.subTest(body=body):
+                with patch.object(hunter_sync, "build_opener",
+                                  return_value=Opener(body)):
+                    with self.assertRaises(ValueError):
+                        hunter_sync.send(packet(100), endpoint, token)
+        # Never accept a response that lies about count, even under 30.
+        with patch.object(hunter_sync, "build_opener",
+                          return_value=Opener({"received": True,
+                                               "accepted_candidate_count": 2})):
+            with self.assertRaises(ValueError):
+                hunter_sync.send(packet(1), endpoint, token)
+
     def test_pro_endpoint_rejects_other_origins_and_token_in_url(self):
         token = "x" * 26
         good = "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync"
