@@ -13,6 +13,18 @@ class PotentialCandidateTests(unittest.TestCase):
                    'description':'Goed onderhouden, auto rijdt normaal. '*9}
     def car(self,i,**kw):
         return {**self.base,'url':URL.replace('m123',f'm{i}'),**kw}
+    def test_bounded_300_local_candidate_pool_without_affecting_default(self):
+        rows=[self.car(15000+i,price=900) for i in range(320)]
+        normal=select_potential_candidates(rows,[],now=self.now)
+        broad=select_potential_candidates(rows,[],limit=300,now=self.now)
+        capped=select_potential_candidates(rows,[],limit=10000,now=self.now)
+        self.assertEqual(len(normal),30)
+        self.assertEqual(len(broad),300)
+        self.assertEqual(len(capped),300)
+        self.assertEqual(len({r["url"] for r in broad}),300)
+        self.assertEqual(broad[0]["potential_rank"],1)
+        self.assertEqual(broad[-1]["potential_rank"],300)
+
     def test_30_unique_even_when_forty_listings_exist(self):
         rows=[self.car(1000+i,price=900+i*20) for i in range(40)]
         results=select_potential_candidates(rows,[],now=self.now)
