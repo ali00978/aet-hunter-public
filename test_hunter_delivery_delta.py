@@ -110,6 +110,69 @@ class AcknowledgedDeltaTests(unittest.TestCase):
                  {"marktplaats":{},"facebook":{}})
 
 
+    def test_material_repair_updates_without_noisy_scan_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            initial = candidate(101)
+            _, saved, _ = plan(combined([initial]), "marktplaats", load(tmp))
+            acknowledge(tmp, "marktplaats", saved)
+            scanned = {**initial, "checked_at": "2026-10-25T02:00:00+00:00",
+                       "issues": ["Niet opnieuw gecontroleerd tijdens laatste scan"],
+                       "rank": 14}
+            quiet, _, stats = plan(combined([scanned]), "marktplaats", load(tmp))
+            self.assertEqual(quiet["count"], 0)
+            self.assertEqual(stats["repeated"], 1)
+            repair = {**scanned, "issues": [
+                "Niet opnieuw gecontroleerd tijdens laatste scan",
+                "APK loopt af: mogelijke herstelkosten controleren"]}
+            changed, signatures, stats = plan(
+                combined([repair]), "marktplaats", load(tmp))
+            self.assertEqual(changed["count"], 1)
+            self.assertEqual(stats["changed"], 1)
+            acknowledge(tmp, "marktplaats", signatures)
+            repeat, _, _ = plan(combined([repair]), "marktplaats", load(tmp))
+            self.assertEqual(repeat["count"], 0)
+            repaired, _, stats = plan(combined([initial]), "marktplaats", load(tmp))
+            self.assertEqual(repaired["count"], 1)
+            self.assertEqual(stats["changed"], 1)
+
+    def test_material_market_value_change_not_comparison_noise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            initial = candidate(102)
+            first, signatures, _ = plan(
+                combined([initial]), "marktplaats", load(tmp))
+            self.assertEqual(first["count"], 1)
+            acknowledge(tmp, "marktplaats", signatures)
+            valued = {**initial, "median_comparable_asking_price_eur": 2500,
+                      "indicative_resale_eur": 2200}
+            valued_delta, signatures, stats = plan(
+                combined([valued]), "marktplaats", load(tmp))
+            self.assertEqual((valued_delta["count"], stats["changed"]), (1, 1))
+            acknowledge(tmp, "marktplaats", signatures)
+            small_sample_shift = {**valued,
+                                  "median_comparable_asking_price_eur": 2520,
+                                  "comparable_count": 5}
+            no_noise, _, _ = plan(
+                combined([small_sample_shift]), "marktplaats", load(tmp))
+            self.assertEqual(no_noise["count"], 0)
+            meaningful_shift = {**small_sample_shift,
+                                "median_comparable_asking_price_eur": 2710}
+            alert, signatures, _ = plan(
+                combined([meaningful_shift]), "marktplaats", load(tmp))
+            self.assertEqual(alert["count"], 1)
+            acknowledge(tmp, "marktplaats", signatures)
+            confidence_lost, _, _ = plan(
+                combined([initial]), "marktplaats", load(tmp))
+            self.assertEqual(confidence_lost["count"], 1)
+
+    def test_facebook_fingerprint_unchanged_by_marktplaats_rule(self):
+        facebook = {"id": "facebook:123456789", "source": "facebook",
+                    "title": "TEST Opel Corsa", "asking_price_eur": 1000}
+        with_metadata = {**facebook,
+                         "median_comparable_asking_price_eur": 2400,
+                         "issues": ["APK loopt af: mogelijke herstelkosten controleren"]}
+        self.assertEqual(fingerprint(facebook), fingerprint(with_metadata))
+
+
 class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
     """Synthetic cars only; no HTTP or added marketplace requests."""
 

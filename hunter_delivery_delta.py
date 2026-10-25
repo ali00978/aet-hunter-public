@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -18,6 +19,16 @@ SCHEMA = "aet.hunter.delivery-delta.v1"
 PLATFORMS = ("marktplaats", "facebook")
 # Fields are genuine sale/research changes, NOT the scanner clock, rank,
 # signed image URLs, freshness label or the rolling comparison sample.
+# Material scanner notes are stable safety findings. Exclude routine uncertainty
+# ("not rechecked"), rank and timestamps to prevent repeated pseudo-updates.
+REPAIR_NOTE_PREFIXES = (
+    "Airco werkt mogelijk niet:",
+    "Cosmetisch/elektrisch herstelpunt:",
+    "APK loopt af:",
+    "Door scanner gemeld herstelpunt:",
+)
+MARKET_FIELDS = ("median_comparable_asking_price_eur", "indicative_resale_eur")
+
 BUSINESS_FIELDS = (
     "id", "source", "title", "year", "mileage_km",
     "seller_classification", "location_label", "price_type",
@@ -31,6 +42,25 @@ def fingerprint(candidate):
     if not isinstance(candidate.get("id"), str) or not isinstance(candidate.get("source"), str):
         raise ValueError("Missing stable Hunter identity")
     value = {key: candidate.get(key) for key in BUSINESS_FIELDS}
+    if candidate["source"] == "marktplaats":
+        # A real newly discovered repair risk MUST reach the PRO inbox, even
+        # when title, price and mileage have not changed. Generic scan-time
+        # warnings are not material and must never generate false updates.
+        notes = candidate.get("issues")
+        if isinstance(notes, list):
+            repair_notes = sorted({note.strip() for note in notes
+                                   if isinstance(note, str) and
+                                   note.strip().startswith(REPAIR_NOTE_PREFIXES)})
+            if repair_notes:
+                value["material_repair_notes"] = repair_notes
+        # Market median/resale can move slightly as the comparison sample
+        # rotates. Notify on a >=100 EUR *band* change, not every tiny shift;
+        # never treat unverified / missing values as demonstrated profit.
+        for field in MARKET_FIELDS:
+            amount = candidate.get(field)
+            if (type(amount) in (int, float) and math.isfinite(amount)
+                    and 0 < amount <= 1_000_000):
+                value[field + "_100eur_band"] = int((amount + 50) // 100) * 100
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
                          separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
