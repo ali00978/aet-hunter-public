@@ -60,7 +60,7 @@ def fingerprint(candidate, legacy=False):
         # are not new car offers. Keep older hashes readable for migration.
         for key in ("title", "location_label"):
             value[key] = _stable_text(value[key])
-    if candidate["source"] == "marktplaats" and not legacy:
+    if candidate["source"] == "marktplaats":
         # A real newly discovered repair risk MUST reach the PRO inbox, even
         # when title, price and mileage have not changed. Generic scan-time
         # warnings are not material and must never generate false updates.
