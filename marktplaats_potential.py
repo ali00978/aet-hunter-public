@@ -3,7 +3,7 @@ import math
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from car_triage import HIGH_RISK, vehicle_identity
+from car_triage import HIGH_RISK, vehicle_identity, estimated_trade_costs
 from marktplaats_data import seller_evidence, vehicle_facts
 from marktplaats_market import extra_repair_reserve, listing_id, technical_risk_signals
 
@@ -22,6 +22,41 @@ MINOR_RE = re.compile(
 
 def _amount(n):
     return isinstance(n, (int, float)) and not isinstance(n, bool) and math.isfinite(n) and 0 <= n <= 1_000_000
+
+def _margin_evidence(row, median, price, facts):
+    """Conservative *asking-price* scenario for ranking, never sale/profit proof.
+
+    Use the same 85% of independent comparable ASKING prices as quality_gate,
+    add a bounded repair reserve, and scale the target with purchase exposure.
+    No extra HTTP calls, no invented sale prices or confirmed buying advice.
+    """
+    year = facts.get('year_detected')
+    km = facts.get('mileage_km')
+    if (not isinstance(year, int) or isinstance(year, bool)
+            or not isinstance(km, (int, float)) or isinstance(km, bool)
+            or not 1950 <= year <= 2030 or not 0 <= km <= 330000
+            or not _amount(median) or median > 12000
+            or not _amount(price) or price > 3000):
+        return None
+    apk = row.get('apk_status') or 'onbekend'
+    details = {**facts, 'apk_status': apk}
+    computed, _ = estimated_trade_costs(row, details)
+    airco, _ = extra_repair_reserve(row)
+    reserve = computed + airco + (250 if apk == 'verloopt_binnen_30_dagen' else 0)
+    existing = row.get('estimated_costs_allowance_eur')
+    if _amount(existing):
+        # The strict scanner may already include a higher allowance.
+        reserve = max(reserve, existing)
+    resale = round(median * .85)
+    margin = round(resale - price - reserve)
+    # At EUR 500 inkoop: EUR 500 target; at EUR 2,500: EUR 800.
+    target = max(500, round(price * .32))
+    max_bid = max(0, min(3000, round(resale - reserve - target)))
+    full_description = (row.get('description_source') in ('jsonld', 'pagina_tekst')
+                        and len(str(row.get('description') or '').strip()) >= 180)
+    return {'margin': margin, 'target': target, 'max_bid': max_bid,
+            'reserve': round(reserve), 'description_checked': full_description}
+
 
 def _candidate(row, now, max_price):
     from scanner import approved_listing_brand, over_purchase_mileage_limit, is_financing_offer
@@ -97,8 +132,28 @@ def _candidate(row, now, max_price):
         score = 0
     ident = vehicle_identity(row)
     model_key = (ident.get('brand'),ident.get('model')) if ident.get('model') else (listing_id(url),None)
-    discount = (median-price)/median if compared and kind == 'FIXED' else 0
-    rank = (0 if discount >= .15 else 1, 0 if compared else 1,
+    # A 20% discount on a comparable asking price is NOT necessarily a
+    # trade opportunity after transport, APK, repair and selling reserves.
+    evidence = _margin_evidence(row, median, price, vehicle_facts(row)) if compared and kind == 'FIXED' else None
+    if evidence:
+        margin, target = evidence['margin'], evidence['target']
+        if margin >= target and evidence['description_checked']:
+            tier = 0  # promising research: costs and target covered, still unverified
+        elif margin >= target:
+            tier = 1  # promising on paper, description needs independent review
+        elif margin > 0:
+            tier = 2  # some theoretical margin but not the risk-adjusted target
+        else:
+            tier = 3  # asking price does not cover conservative costs
+        notes.append('Rekenindicatie na kostenreserve EUR %d: EUR %d marge versus doel EUR %d, vóór belasting; geen bevestigde winst'
+                     % (evidence['reserve'], margin, target))
+        if tier >= 2:
+            notes.append('Vraagprijs te hoog voor het doel; maximale onderzoeksbieding ca. EUR %d' %
+                         evidence['max_bid'])
+    else:
+        tier = 4  # unknown margin, unknown fixed price or missing essential data
+    rank = (tier,
+            -max(-10000, min(10000, evidence['margin']-evidence['target'])) if evidence else 0,
             0 if kind == 'FIXED' and price <= 2000 else 1,
             -max(0,min(100,score)), -stamp.timestamp())
     return {**row, 'seller_type':seller, 'potential_category':category,
@@ -156,4 +211,7 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     for cap in (3,6,limit):
         for category,_ in TARGET_MIX:
             fill(category,cap)
+    # Preserve existing diverse-category quotas but present the most defensible
+    # opportunities first, not always the fixed-price bucket before every other.
+    selected.sort(key=lambda row: row['potential_sort'])
     return [{**row,'potential_rank':i+1} for i,row in enumerate(selected[:limit])]
