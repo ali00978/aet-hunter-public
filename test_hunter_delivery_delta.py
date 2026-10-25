@@ -431,7 +431,7 @@ class RotatingThreeHundredPoolTests(unittest.TestCase):
                     limit=100)
                 self.assertLessEqual(export["count"], 100)
                 scoped, signatures, counters = plan(
-                    export, "marktplaats", checkpoint)
+                    combined(export["candidates"]), "marktplaats", checkpoint)
                 self.assertEqual(scoped["count"], expected)
                 self.assertEqual(counters["new_to_delivery"], expected)
                 ids = {row["id"] for row in scoped["candidates"]}
