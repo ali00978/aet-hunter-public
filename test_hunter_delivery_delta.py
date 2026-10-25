@@ -53,6 +53,54 @@ class AcknowledgedDeltaTests(unittest.TestCase):
                                      "changed":0,"repeated":2})
             self.assertEqual(set(sigs), {"marktplaats:m101", "marktplaats:m102"})
 
+    def test_title_formatting_ignored_after_safe_checkpoint_migration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original = candidate(301)
+            original["title"] = "Opel Corsa 1.2 - 2008"
+            # This is the signature format already stored by production before
+            # canonicalization shipped. It must NOT trigger a mass redelivery.
+            legacy_state = load(tmp)
+            legacy_sig = fingerprint(original, legacy=True)
+            self.assertNotEqual(legacy_sig, fingerprint(original))
+            legacy_state["marktplaats"][original["id"]] = legacy_sig
+            (Path(tmp) / FILE).write_text(json.dumps(legacy_state))
+            first, signatures, counters = plan(
+                combined([original]), "marktplaats", load(tmp))
+            self.assertEqual(first["count"], 0)
+            self.assertEqual(counters["repeated"], 1)
+            acknowledge(tmp, "marktplaats", signatures)
+            self.assertEqual(load(tmp)["marktplaats"][original["id"]],
+                             fingerprint(original))
+            reworded = {
+                **original,
+                "title": "  OPEL  CORSA  1.2 – 2008!!! ",
+                "location_label": "test   ALMERE  ",
+                "checked_at": "2026-10-25T02:00:00+00:00",
+            }
+            quiet, _, counters = plan(
+                combined([reworded]), "marktplaats", load(tmp))
+            self.assertEqual(quiet["count"], 0)
+            self.assertEqual(counters["repeated"], 1)
+            # Real new content must still reach AET Pro, not be normalized.
+            material = {**reworded, "title": "Opel Corsa 1.4 - 2008"}
+            changed, _, stats = plan(
+                combined([material]), "marktplaats", load(tmp))
+            self.assertEqual(changed["count"], 1)
+            self.assertEqual(stats["changed"], 1)
+            lower_price = {**reworded, "asking_price_eur": 990}
+            changed, _, stats = plan(
+                combined([lower_price]), "marktplaats", load(tmp))
+            self.assertEqual(changed["count"], 1)
+            self.assertEqual(stats["changed"], 1)
+
+    def test_facebook_formatting_is_not_silently_normalized(self):
+        facebook = {"id": "facebook:111222333", "source": "facebook",
+                    "title": "Opel Corsa 1.2", "content_hash": "a"*64}
+        changed = {**facebook, "title": "OPEL CORSA 1.2"}
+        self.assertNotEqual(fingerprint(facebook), fingerprint(changed))
+        self.assertEqual(fingerprint(facebook, legacy=True),
+                         fingerprint(facebook))
+
     def test_price_change_or_truly_new_listing_is_delivered(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, signs, _ = plan(combined([candidate(101)]), "marktplaats", load(tmp))

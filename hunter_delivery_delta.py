@@ -10,7 +10,9 @@ import hashlib
 import json
 import math
 import os
+import re
 import tempfile
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,12 +38,28 @@ BUSINESS_FIELDS = (
 )
 
 
-def fingerprint(candidate):
+def _stable_text(value):
+    """Canonicalize presentation-only edits, keeping vehicle model digits."""
+    if not isinstance(value, str):
+        return value
+    text = unicodedata.normalize("NFKC", value).casefold()
+    text = re.sub(r"[\u2010-\u2015\u2212]", "-", text)
+    text = re.sub(r"\s*-\s*", "-", text)
+    text = re.sub(r"!+", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fingerprint(candidate, legacy=False):
     if not isinstance(candidate, dict):
         raise ValueError("Invalid Hunter candidate")
     if not isinstance(candidate.get("id"), str) or not isinstance(candidate.get("source"), str):
         raise ValueError("Missing stable Hunter identity")
     value = {key: candidate.get(key) for key in BUSINESS_FIELDS}
+    if candidate["source"] == "marktplaats" and not legacy:
+        # Case, line breaks, punctuation styling and spacing in title/city
+        # are not new car offers. Keep older hashes readable for migration.
+        for key in ("title", "location_label"):
+            value[key] = _stable_text(value[key])
     if candidate["source"] == "marktplaats":
         # A real newly discovered repair risk MUST reach the PRO inbox, even
         # when title, price and mileage have not changed. Generic scan-time
@@ -99,7 +117,12 @@ def plan(combined, platform, recorded):
         key = item["id"]
         sig = fingerprint(item)
         signatures[key] = sig
-        if previous.get(key) == sig:
+        previous_sig = previous.get(key)
+        if previous_sig == sig or (
+                platform == "marktplaats" and previous_sig is not None
+                and previous_sig == fingerprint(item, legacy=True)):
+            # Silently upgrade an unchanged older checkpoint to the new
+            # normalized signature AFTER the Worker acknowledges the scan.
             continue
         changed.append(item)
         if key in previous:
