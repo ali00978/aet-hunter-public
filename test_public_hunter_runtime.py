@@ -354,6 +354,56 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
 
 
+    def test_archived_marktplaats_research_does_not_reappear_as_new_pro_leads(self):
+        """A healthy empty scan may preserve a historical snapshot, never a new lead."""
+        import scanner
+        import hunter_feed
+        import hunter_pro_combined
+        import hunter_sync
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            env = {
+                "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+                "AET_PRO_SYNC_URL":
+                    "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                "AET_HUNTER_SYNC_TOKEN": "x" * 26,
+                "AET_HUNTER_STATE_DIR": folder,
+            }
+            historical = {
+                "version": 1, "generated_at": now.isoformat(),
+                "scan_checked_at": now.isoformat(), "archived": True,
+                "count": 1, "cars": [{
+                    "url": "https://www.marktplaats.nl/v/auto-s/opel/m12345678-test",
+                    "title": "TEST Opel Corsa 2008", "seller_type": "particulier",
+                    "price_type": "FIXED", "price": 950,
+                    "checked_at": now.isoformat(), "year": 2008,
+                    "mileage_km": 195000,
+                }],
+            }
+            sent = []
+            def scan():
+                (root / "marktplaats_status.json").write_text(json.dumps({
+                    "checked_at": now.isoformat(), "scan_health": "ok"}))
+            def send(batch, *_):
+                sent.append(batch)
+                return {"received": True}
+            with (patch.object(scanner, "main", side_effect=scan),
+                  patch.object(hunter_feed, "build", return_value=historical),
+                  patch.object(runtime, "receiver_marktplaats_limit", return_value=30),
+                  patch.object(hunter_sync, "send", side_effect=send)):
+                self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0]["scan"]["candidate_ids"], [])
+            self.assertEqual(sent[0]["batch"]["platform_counts"]["marktplaats"], 0)
+            self.assertEqual(json.loads((root / "hunter_pro_export.json").read_text())
+                             ["count"], 1, "Historical records remain inspectable")
+            self.assertEqual(json.loads((root / "hunter_pro_combined.json").read_text())
+                             ["platform_counts"]["marktplaats"], 0)
+            self.assertEqual(json.loads((root / "hunter_feed.json").read_text())
+                             ["count"], 1)
+
+
     def test_facebook_provider_snapshot_to_aet_pro_batch_without_network(self):
         import hunter_sync
         import hunter_feed
