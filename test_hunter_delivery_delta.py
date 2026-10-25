@@ -340,7 +340,7 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
                                "marktplaats",{"marktplaats":known,"facebook":{},
                                                 "marktplaats_fingerprint_revision":2})
         self.assertEqual(counts["new_to_delivery"],15)
-        self.assertEqual(counts["repeated"],15)
+        self.assertEqual(counts["repeated"],0)
         self.assertEqual(picked["count"],15)
 
     def test_unseen_cars_not_hidden_by_legacy_market_hashes(self):
@@ -376,29 +376,30 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
                             known_fingerprints=all_previously_sent,limit=50)
         self.assertEqual(empty["count"],0)
 
-    def test_price_drop_prioritized_and_unchanged_skipped(self):
+    def test_updated_price_is_kept_for_research_but_never_sent_as_new(self):
         from hunter_pro_export import build_payload
         rows=[self.raw(i) for i in range(30)]
         feed={"version":1,"cars":rows}
         known={item["id"]:fingerprint(item)
                for item in build_payload(feed)["candidates"]}
         baseline=build_payload(feed,known_fingerprints=known)
-        selected,_,counts=plan({"schema":"aet-pro.hunter.v2",
-                                 "candidates":baseline["candidates"]},
-                                "marktplaats",{"marktplaats":known,"facebook":{},
-                                                "marktplaats_fingerprint_revision":2})
-        self.assertEqual(selected["count"],0)
-        self.assertEqual(counts["repeated"],30)
+        self.assertEqual(baseline["count"],0)
         rows[29]={**rows[29],"price":1200,
                   "checked_at":"2026-10-25T02:00:00+00:00"}
-        changed=build_payload(feed,known_fingerprints=known)
-        self.assertEqual(changed["candidates"][0]["id"],"marktplaats:m10029")
+        self.assertEqual(build_payload(feed,known_fingerprints=known)["count"],0)
+        original_research=build_payload(feed)
+        self.assertEqual(original_research["count"],30)
+        self.assertEqual(original_research["candidates"][29]["asking_price_eur"],1200)
+        # Even an outdated archive export cannot re-deliver acknowledged IDs
+        # when runtime uses strict new-only delivery planning.
         picked,_,counts=plan({"schema":"aet-pro.hunter.v2",
-                              "candidates":changed["candidates"]},
+                              "candidates":original_research["candidates"]},
                              "marktplaats",{"marktplaats":known,"facebook":{},
-                                                "marktplaats_fingerprint_revision":2})
-        self.assertEqual(picked["count"],1)
-        self.assertEqual(counts["changed"],1)
+                                                "marktplaats_fingerprint_revision":2},
+                             new_only=True)
+        self.assertEqual(picked["count"],0)
+        self.assertEqual(counts["changed"],0)
+        self.assertEqual(counts["repeated"],30)
 
 
 class HundredCandidateHandoffTests(unittest.TestCase):
