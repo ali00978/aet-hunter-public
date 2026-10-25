@@ -186,24 +186,34 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         if not healthy:
             return "unhealthy"
         now = datetime.now(timezone.utc)
+        # Load only acknowledged deliveries, BEFORE choosing the next 30
+        # records. An unchanged top 30 must never conceal newly discovered
+        # candidates ranked 31-100 by the existing offline quality filter.
+        from hunter_delivery_delta import load as load_delivered, plan, acknowledge
+        checkpoint = load_delivered(root)
+        broader_mp_feed = None
+        previous_mp_signatures = None
         if platform == "marktplaats":
-            # Mirror the original Hunter: retain both the app feed and
-            # the versioned Marktplaats export before the combined AET Pro batch.
+            # Preserve the original 30-card snapshot/export for existing
+            # consumers. The sync selection can inspect 100 already collected
+            # candidates without requesting any more marketplace pages.
             import hunter_pro_export
             mp_feed = hunter_feed.snapshot()
             hunter_pro_export.write_payload(
                 target=root / "hunter_pro_export.json", feed=mp_feed)
+            broader_mp_feed = hunter_feed.build(now=now, limit=100)
+            previous_mp_signatures = checkpoint["marktplaats"]
         # Always write inside the PRIVATE temp state directory. Calling
         # write(now=now) would use the module's import-time default OUTPUT,
         # which can point into the public checkout on a GitHub runner.
         combined = hunter_pro_combined.write(
-            path=root / "hunter_pro_combined.json", now=now)
+            path=root / "hunter_pro_combined.json", now=now,
+            mp_feed=broader_mp_feed,
+            known_mp_fingerprints=previous_mp_signatures)
         persist()
         # Full research archive is not the same as newly discovered ads.
         # Compare against ONLY confirmed prior deliveries; failed syncs must
         # be retried instead of quietly losing potential opportunities.
-        from hunter_delivery_delta import load as load_delivered, plan, acknowledge
-        checkpoint = load_delivered(root)
         scoped, signatures, changes = plan(combined, platform, checkpoint)
         print(platform + ": bekeken_in_export=" + str(changes["observed"]) +
               ", nieuw=" + str(changes["new_to_delivery"]) +
