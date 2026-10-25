@@ -2542,6 +2542,56 @@ def archive_research_links(records, last_checked, cooldown, now_ts, limit=18, se
             references.extend(additions)
     return selected + references[:12]
 
+def prioritize_undelivered_purchase_details(selected, groups, history, cooldown,
+                                             now_ts, facts, delivered_ids, limit,
+                                             cached_urls=None, priorities=None):
+    """Allocate up to 80% of existing detail slots to unsent affordable cars.
+
+    Purely local queue reordering/refilling: the discovery and HTTP request
+    ceilings, five-second pacing and 403/429 protection are unchanged. Keep
+    the remaining slots for independent price comparisons and older research.
+    If new eligible stock is genuinely exhausted, retain the original plan.
+    """
+    selected = list(selected)[:limit]
+    if not delivered_ids or not groups or limit <= 0:
+        return selected, 0
+    delivered_ids = set(delivered_ids)
+    facts = facts if isinstance(facts, dict) else {}
+    eligible = select_diverse_detail_links(
+        groups, history, cooldown, now_ts,
+        limit=min(sum(len(group) for group in groups), limit * 4),
+        cached_urls=cached_urls, priorities=priorities, facts=facts)
+    priority_types = ('affordable_fixed', 'unverified_price_hint')
+    # Original choices keep their rank; new alternatives can replace only
+    # old/dealer/reference slots, never push aside stronger already-selected
+    # never-delivered purchase candidates.
+    best = []
+    used = set()
+    for url in selected + eligible:
+        key = listing_id(url)
+        if (key in used or key in delivered_ids or
+                detail_research_category(url, facts) not in priority_types):
+            continue
+        fact = facts.get(url)
+        if not isinstance(fact, dict) or unsafe_for_purchase_shortlist(fact):
+            continue
+        best.append(url)
+        used.add(key)
+    budget = max(1, (limit * 4) // 5)
+    promoted = best[:budget]
+    used = {listing_id(url) for url in promoted}
+    remainder = []
+    for url in selected:
+        key = listing_id(url)
+        if key not in used:
+            remainder.append(url)
+            used.add(key)
+    result = (promoted + remainder)[:limit]
+    selected_ids = {listing_id(url) for url in selected}
+    added = sum(listing_id(url) not in selected_ids for url in result)
+    return result, added
+
+
 def main():
     started = time.monotonic()
     run_now = datetime.now(timezone.utc)
@@ -2564,6 +2614,11 @@ def main():
         cooldown = {}
     if not isinstance(cooldown, dict):
         cooldown = {}
+    # Only the authenticated, acknowledged private delivery history defines
+    # a repeat. Rechecking a previously delivered page can be useful for price
+    # comparisons, but it must not crowd out new cheap cars this scan.
+    from hunter_delivery_delta import load as load_delivery_checkpoint
+    delivered_to_pro = set(load_delivery_checkpoint(Path.cwd())["marktplaats"])
     # JSON booleans are integers in Python; never interpret them as expiry
     # timestamps or retry counts. Reject invalid persisted key types too.
     cooldown = {k: v for k, v in cooldown.items()
@@ -3131,6 +3186,11 @@ def main():
     for url in detail_links[before_post_mix_refill:]:
         kind = detail_research_category(url, search_facts)
         detail_selection_mix[kind] = detail_selection_mix.get(kind, 0) + 1
+    detail_links, new_delivery_refills = prioritize_undelivered_purchase_details(
+        detail_links, search_groups, last_checked, cooldown, time.time(),
+        search_facts, delivered_to_pro, detail_budget, cached_urls=cached_urls,
+        priorities=card_priorities)
+    detail_selection_mix['new_delivery_refills'] = new_delivery_refills
     detail_selection_mix['total_selected'] = len(detail_links)
     detail_selection_mix['post_mix_slots_refilled'] = post_mix_slots_refilled
     eligible_detail_links = len(detail_links)
