@@ -254,6 +254,14 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             mp_limit = receiver_marktplaats_limit(endpoint)
             print("marktplaats: ontvangercapaciteit=" + str(mp_limit), flush=True)
             broader_mp_feed = hunter_feed.build(now=now, limit=300)
+            if broader_mp_feed.get("archived"):
+                # An empty healthy scan can fall back to previously saved
+                # research. Retain that private archive for inspection, but
+                # never deliver old unverified offers as NEW AET Pro leads.
+                # This changes no marketplace requests or delivery history.
+                broader_mp_feed = {**broader_mp_feed, "cars": [], "count": 0}
+                print("marktplaats: alleen_historisch_onderzoek; geen_nieuwe_leads",
+                      flush=True)
             previous_mp_signatures = checkpoint["marktplaats"]
         # Always write inside the PRIVATE temp state directory. Calling
         # write(now=now) would use the module's import-time default OUTPUT,
