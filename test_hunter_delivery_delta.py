@@ -296,7 +296,8 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         self.assertTrue(expected.issubset({x["id"] for x in updated["candidates"]}))
         picked, _, counts=plan({"schema":"aet-pro.hunter.v2",
                                 "candidates":updated["candidates"]},
-                               "marktplaats",{"marktplaats":known,"facebook":{}})
+                               "marktplaats",{"marktplaats":known,"facebook":{},
+                                                "marktplaats_fingerprint_revision":2})
         self.assertEqual(counts["new_to_delivery"],15)
         self.assertEqual(counts["repeated"],15)
         self.assertEqual(picked["count"],15)
@@ -329,7 +330,8 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         baseline=build_payload(feed,known_fingerprints=known)
         selected,_,counts=plan({"schema":"aet-pro.hunter.v2",
                                  "candidates":baseline["candidates"]},
-                                "marktplaats",{"marktplaats":known,"facebook":{}})
+                                "marktplaats",{"marktplaats":known,"facebook":{},
+                                                "marktplaats_fingerprint_revision":2})
         self.assertEqual(selected["count"],0)
         self.assertEqual(counts["repeated"],30)
         rows[29]={**rows[29],"price":1200,
@@ -338,7 +340,8 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         self.assertEqual(changed["candidates"][0]["id"],"marktplaats:m10029")
         picked,_,counts=plan({"schema":"aet-pro.hunter.v2",
                               "candidates":changed["candidates"]},
-                             "marktplaats",{"marktplaats":known,"facebook":{}})
+                             "marktplaats",{"marktplaats":known,"facebook":{},
+                                                "marktplaats_fingerprint_revision":2})
         self.assertEqual(picked["count"],1)
         self.assertEqual(counts["changed"],1)
 
