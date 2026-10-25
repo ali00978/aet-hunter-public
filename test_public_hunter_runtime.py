@@ -47,6 +47,25 @@ class StandaloneRuntimeTests(unittest.TestCase):
                         {"seller_name":"private"}):
             self.assertIsNone(runtime.safe_scan_counters(invalid))
 
+    def test_delivery_checkpoint_continuity_reports_counts_only(self):
+        existing = {"marktplaats": {
+            "marktplaats:m123456": "0"*64,
+            "marktplaats:m222222": "1"*64},
+            "facebook": {"facebook:999999999": "a"*64}}
+        self.assertEqual(runtime.checkpoint_history_count(existing, "marktplaats"), 2)
+        self.assertEqual(runtime.checkpoint_history_count(existing, "facebook"), 1)
+        self.assertEqual(runtime.checkpoint_history_count(
+            {"marktplaats": {}, "facebook": {}}, "marktplaats"), 0)
+        for broken, source in [
+            ({}, "marktplaats"),
+            ({"marktplaats": []}, "marktplaats"),
+            (existing, "untrusted"),
+            ({"marktplaats": {str(n): "0"*64 for n in range(3001)}},
+             "marktplaats"),
+        ]:
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                runtime.checkpoint_history_count(broken, source)
+
     def test_explicit_live_gate_precedes_all_network_and_sync(self):
         self.assertEqual(runtime.run_platform("marktplaats", env={}), "disabled")
         self.assertEqual(runtime.run_platform("facebook", env={}), "disabled")
