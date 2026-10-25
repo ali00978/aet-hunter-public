@@ -52,7 +52,8 @@ def _profit_evidence(row, comparison, price):
     # At higher purchase prices A.E.T CARS needs more risk/reward than EUR 500.
     target = max(minimum_profit(), round(price * .30))
     margin = round(conservative_resale - price - derived_costs)
-    buy_limit = max(0, round(conservative_resale - derived_costs - target))
+    # Research offers may never exceed the owner's EUR 3000 purchase budget.
+    buy_limit = min(3000, max(0, round(conservative_resale - derived_costs - target)))
     return {'net_eur': margin, 'target_eur': round(target),
             'costs_eur': round(derived_costs), 'resale_eur': round(conservative_resale),
             'max_buy_eur': buy_limit}
@@ -158,8 +159,13 @@ def _candidate(row, now, max_price):
             notes.append(
                 f"Vraagprijs boven berekende biedgrens EUR {evidence['max_buy_eur']}; "
                 "alleen na lagere inkoopprijs mogelijk interessant")
-    priority = 0 if strong else (1 if evidence is None else
-               2 if evidence['net_eur'] >= 0 else 3)
+    # Unverified but cost-supported candidates deserve review before
+    # unknown-market entries; entries with nonpositive margin rank last.
+    # None of these tiers is proof of achievable resale proceeds.
+    priority = (0 if strong else
+                1 if evidence is not None and evidence['net_eur'] >= evidence['target_eur'] else
+                2 if evidence is not None and evidence['net_eur'] > 0 else
+                3 if evidence is None else 4)
     rank = (priority, 0 if compared else 1,
             0 if kind == 'FIXED' and price <= 2000 else 1,
             0 if discount >= .15 else 1,
