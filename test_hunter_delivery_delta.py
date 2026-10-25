@@ -110,5 +110,57 @@ class AcknowledgedDeltaTests(unittest.TestCase):
                  {"marktplaats":{},"facebook":{}})
 
 
+class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
+    """Synthetic cars only; no HTTP or added marketplace requests."""
+
+    @staticmethod
+    def raw(i, price=1500):
+        return {"url":"https://www.marktplaats.nl/v/auto-s/opel/m"
+                + str(10000+i) + "-test-corsa",
+                "title":"TEST Opel Corsa 2012 #" + str(i), "year":2012,
+                "mileage_km":110000, "seller_type":"particulier",
+                "price_type":"FIXED", "price":price,
+                "checked_at":"2026-10-25T00:00:00+00:00",
+                "potential_category":"vaste_vraagprijs"}
+
+    def test_new_items_beyond_old_top_30_reach_aet_pro(self):
+        from hunter_pro_export import build_payload
+        feed={"version":1,"cars":[self.raw(i) for i in range(45)]}
+        original=build_payload(feed)
+        self.assertEqual(original["count"],30)
+        known={item["id"]:fingerprint(item) for item in original["candidates"]}
+        updated=build_payload(feed,known_fingerprints=known)
+        expected={"marktplaats:m"+str(10000+i) for i in range(30,45)}
+        self.assertTrue(expected.issubset({x["id"] for x in updated["candidates"]}))
+        picked, _, counts=plan({"schema":"aet-pro.hunter.v2",
+                                "candidates":updated["candidates"]},
+                               "marktplaats",{"marktplaats":known,"facebook":{}})
+        self.assertEqual(counts["new_to_delivery"],15)
+        self.assertEqual(counts["repeated"],15)
+        self.assertEqual(picked["count"],15)
+
+    def test_price_drop_prioritized_and_unchanged_skipped(self):
+        from hunter_pro_export import build_payload
+        rows=[self.raw(i) for i in range(30)]
+        feed={"version":1,"cars":rows}
+        known={item["id"]:fingerprint(item)
+               for item in build_payload(feed)["candidates"]}
+        baseline=build_payload(feed,known_fingerprints=known)
+        selected,_,counts=plan({"schema":"aet-pro.hunter.v2",
+                                 "candidates":baseline["candidates"]},
+                                "marktplaats",{"marktplaats":known,"facebook":{}})
+        self.assertEqual(selected["count"],0)
+        self.assertEqual(counts["repeated"],30)
+        rows[29]={**rows[29],"price":1200,
+                  "checked_at":"2026-10-25T02:00:00+00:00"}
+        changed=build_payload(feed,known_fingerprints=known)
+        self.assertEqual(changed["candidates"][0]["id"],"marktplaats:m10029")
+        picked,_,counts=plan({"schema":"aet-pro.hunter.v2",
+                              "candidates":changed["candidates"]},
+                             "marktplaats",{"marktplaats":known,"facebook":{}})
+        self.assertEqual(picked["count"],1)
+        self.assertEqual(counts["changed"],1)
+
+
 if __name__ == "__main__":
     unittest.main()
