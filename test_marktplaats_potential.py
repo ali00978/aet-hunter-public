@@ -138,5 +138,36 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(result[0]['url'],good['url'])
         self.assertEqual([r['potential_rank'] for r in result],[1,2])
 
+    def test_research_bid_ceiling_never_exceeds_investment_budget(self):
+        from marktplaats_potential import _profit_evidence
+        reference={'status':'indicatieve_vraagprijzen',
+                   'sample_size':4,'median_asking_price_eur':11000,
+                   'high_price_dispersion':False}
+        scenario=_profit_evidence(self.car(9101,price=800),reference,800)
+        self.assertIsNotNone(scenario)
+        self.assertEqual(scenario['max_buy_eur'],3000,
+                         'Huge comparable asking prices never lift the EUR 3000 cap')
+        self.assertGreater(scenario['net_eur'],scenario['target_eur'])
+
+    def test_credible_but_unverified_profit_ranks_above_unknown_and_loss(self):
+        # All ads remain in manual research, but not in a misleading order.
+        cmp={'status':'indicatieve_vraagprijzen',
+             'sample_size':5,'median_asking_price_eur':3000,
+             'high_price_dispersion':False}
+        best=self.car(9110,price=700,market_comparison=cmp)
+        unchecked=self.car(9111,price=800,market_comparison=cmp,
+                           description_source='meta_samenvatting')
+        small=self.car(9112,price=1900,market_comparison=cmp)
+        unknown=self.car(9113,price=1200)
+        loss=self.car(9114,price=2700,market_comparison=cmp)
+        result=select_potential_candidates([loss,unknown,small,unchecked,best],[],
+                                           now=self.now)
+        self.assertEqual([x['url'] for x in result],
+                         [best['url'],unchecked['url'],small['url'],
+                          unknown['url'],loss['url']])
+        self.assertEqual([x['potential_sort'][0] for x in result],
+                         [0,1,2,3,4])
+        self.assertTrue(all(x.get('potential_rank')==i+1
+                            for i,x in enumerate(result)))
 if __name__=='__main__':
     unittest.main()
