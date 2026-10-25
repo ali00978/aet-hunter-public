@@ -84,7 +84,7 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(output[0]['url'],good['url'])
         self.assertEqual(output[0]['potential_sort'][0],0)
         self.assertEqual(output[1]['potential_sort'][0],2)
-        self.assertEqual(output[2]['potential_sort'][0],2)
+        self.assertEqual(output[2]['potential_sort'][0],3)  # No margin after APK reserve
         self.assertTrue(any('geen bevestigde winst' in note
                             for note in output[0]['potential_notes']))
         self.assertTrue(any('EUR 2350' in note
