@@ -199,15 +199,26 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         combined = hunter_pro_combined.write(
             path=root / "hunter_pro_combined.json", now=now)
         persist()
+        # Full research archive is not the same as newly discovered ads.
+        # Compare against ONLY confirmed prior deliveries; failed syncs must
+        # be retried instead of quietly losing potential opportunities.
+        from hunter_delivery_delta import load as load_delivered, plan, acknowledge
+        checkpoint = load_delivered(root)
+        scoped, signatures, changes = plan(combined, platform, checkpoint)
+        print(platform + ": bekeken_in_export=" + str(changes["observed"]) +
+              ", nieuw=" + str(changes["new_to_delivery"]) +
+              ", inhoudelijk_gewijzigd=" + str(changes["changed"]) +
+              ", herhaald_overgeslagen=" + str(changes["repeated"]), flush=True)
         run_id, attempt = durable_scan_identity(env)
         package = hunter_sync.envelope(
             source, run_id, attempt, now=now,
-            combined=combined, source_status=status)
+            combined=scoped, source_status=status)
         # No candidate URLs, details, credentials, or endpoint responses logged.
         answer = hunter_sync.send(package, endpoint, token)
         if answer.get("received") is not True:
             raise RuntimeError("AET Pro did not confirm receipt")
-        print(platform + ": synced; candidates=" +
+        acknowledge(root, platform, signatures, persist)
+        print(platform + ": synced; candidates="
               str(len(package["scan"]["candidate_ids"])))
         return "synced"
     finally:
