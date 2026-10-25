@@ -218,7 +218,7 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         if answer.get("received") is not True:
             raise RuntimeError("AET Pro did not confirm receipt")
         acknowledge(root, platform, signatures, persist)
-        print(platform + ": synced; candidates="
+        print(platform + ": synced; candidates=" +
               str(len(package["scan"]["candidate_ids"])))
         return "synced"
     finally:
