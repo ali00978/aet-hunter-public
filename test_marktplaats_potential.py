@@ -70,5 +70,70 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(len(output),30)
         self.assertEqual({r['potential_category'] for r in output},
                          {'vaste_prijs','klein_herstel','prijs_opvragen','zoekkaart'})
+    def test_strong_discount_that_fails_costs_is_not_top_deal(self):
+        """Relative asking-price discount alone can suggest a false margin."""
+        comparison=lambda median: {
+            'status':'indicatieve_vraagprijzen','sample_size':5,
+            'median_asking_price_eur':median,'high_price_dispersion':False}
+        good=self.car(3001,price=800,market_comparison=comparison(2400))
+        overpaid=self.car(3002,price=1600,market_comparison=comparison(2300))
+        expensive=self.car(3003,price=2500,market_comparison=comparison(4000))
+        output=select_potential_candidates([overpaid,expensive,good],[],
+                                           now=self.now)
+        self.assertEqual(len(output),3)
+        self.assertEqual(output[0]['url'],good['url'])
+        self.assertEqual(output[0]['potential_sort'][0],0)
+        self.assertEqual(output[1]['potential_sort'][0],2)
+        self.assertEqual(output[2]['potential_sort'][0],2)
+        self.assertTrue(any('geen bevestigde winst' in note
+                            for note in output[0]['potential_notes']))
+        self.assertTrue(any('EUR 2350' in note
+                            for note in output[1]['potential_notes']),
+                        'At EUR 2500, the target is EUR 800, not EUR 500')
+
+    def test_airco_and_imminent_apk_consume_possible_profit(self):
+        base={'status':'indicatieve_vraagprijzen','sample_size':4,
+              'median_asking_price_eur':2200}
+        healthy=self.car(3101,price=900,market_comparison=base)
+        airco=self.car(3102,price=900,market_comparison=base,
+                       description='Airco werkt niet, rest is goed. '*12)
+        apk=self.car(3103,price=900,market_comparison=base,
+                     apk_status='verloopt_binnen_30_dagen')
+        got=select_potential_candidates([airco,apk,healthy],[],now=self.now)
+        self.assertEqual(got[0]['url'],healthy['url'])
+        ranked={row['url']:row['potential_sort'][0] for row in got}
+        self.assertEqual(ranked[healthy['url']],0)
+        self.assertGreater(ranked[airco['url']],0)
+        self.assertGreater(ranked[apk['url']],0)
+        self.assertTrue(any('kostenreserve' in n for n in
+                            next(x for x in got if x['url']==airco['url'])['potential_notes']))
+
+    def test_missing_description_or_comparisons_never_present_proven_profit(self):
+        comparison={'status':'indicatieve_vraagprijzen','sample_size':4,
+                    'median_asking_price_eur':2400}
+        checked=self.car(3201,price=800,market_comparison=comparison)
+        incomplete=self.car(3202,price=800,market_comparison=comparison,
+                            description_source='meta_samenvatting')
+        no_evidence=self.car(3203,price=800)
+        got=select_potential_candidates([no_evidence,incomplete,checked],[],
+                                        now=self.now)
+        tiers={x['url']:x['potential_sort'][0] for x in got}
+        self.assertEqual(tiers[checked['url']],0)
+        self.assertEqual(tiers[incomplete['url']],1)
+        self.assertEqual(tiers[no_evidence['url']],4)
+        self.assertFalse(any('Rekenindicatie' in n for n in
+                         next(x for x in got if x['url']==no_evidence['url'])['potential_notes']))
+
+    def test_diversity_and_100_candidate_cap_survive_profit_ranking(self):
+        comparison={'status':'indicatieve_vraagprijzen','sample_size':5,
+                    'median_asking_price_eur':2400}
+        rows=[self.car(4000+i,price=800+i,
+                       market_comparison=comparison) for i in range(120)]
+        got=select_potential_candidates(rows,[],now=self.now,limit=100)
+        self.assertEqual(len(got),100)
+        self.assertEqual(len(set(x['url'] for x in got)),100)
+        self.assertEqual([x['potential_rank'] for x in got],
+                         list(range(1,101)))
+
 if __name__=='__main__':
     unittest.main()
