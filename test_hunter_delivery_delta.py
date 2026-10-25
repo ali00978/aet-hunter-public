@@ -162,5 +162,47 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         self.assertEqual(counts["changed"],1)
 
 
+class HundredCandidateHandoffTests(unittest.TestCase):
+    def test_hundred_distinct_cars_deliver_exactly_once(self):
+        from hunter_pro_export import build_payload
+        from hunter_sync import envelope
+        from datetime import datetime, timezone
+        now=datetime.now(timezone.utc)
+        rows=[BroaderOfflineCandidateSelectionTests.raw(i) for i in range(100)]
+        for row in rows:
+            row["checked_at"]=now.isoformat()
+        mp=build_payload({"version":1,"cars":rows},limit=100)
+        self.assertEqual(mp["count"],100)
+        self.assertEqual(len({r["id"] for r in mp["candidates"]}),100)
+        packet={"schema":"aet-pro.hunter.v2","count":100,"candidates":mp["candidates"],
+                "platform_counts":{"marktplaats":100,"facebook":0},
+                "revision":"a"*64}
+        scanned={"checked_at":now.isoformat(),"scan_health":"ok"}
+        package=envelope("marktplaats",54321,1,now=now,combined=packet,
+                         source_status=scanned)
+        self.assertEqual(len(package["scan"]["candidate_ids"]),100)
+        with tempfile.TemporaryDirectory() as tmp:
+            result, signatures, counts=plan(packet,"marktplaats",load(tmp))
+            self.assertEqual(result["count"],100)
+            self.assertEqual(counts["new_to_delivery"],100)
+            acknowledge(tmp,"marktplaats",signatures)
+            repeated,_,counts2=plan(packet,"marktplaats",load(tmp))
+            self.assertEqual(repeated["count"],0)
+            self.assertEqual(counts2["repeated"],100)
+
+    def test_over_capacity_rejected_and_default_remains_thirty(self):
+        from hunter_pro_export import build_payload
+        rows=[BroaderOfflineCandidateSelectionTests.raw(i) for i in range(101)]
+        feed={"version":1,"cars":rows}
+        self.assertEqual(build_payload(feed)["count"],30)
+        self.assertEqual(build_payload(feed,limit=100)["count"],100)
+        with self.assertRaises(ValueError):
+            build_payload(feed,limit=101)
+        packet={"schema":"aet-pro.hunter.v2","candidates":[
+            candidate(10000+i) for i in range(101)]}
+        with self.assertRaisesRegex(ValueError,"Too many"):
+            plan(packet,"marktplaats",{"marktplaats":{},"facebook":{}})
+
+
 if __name__ == "__main__":
     unittest.main()
