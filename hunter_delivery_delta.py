@@ -29,7 +29,11 @@ REPAIR_NOTE_PREFIXES = (
     "APK loopt af:",
     "Door scanner gemeld herstelpunt:",
 )
-MARKET_FIELDS = ("median_comparable_asking_price_eur", "indicative_resale_eur")
+# Market valuations are moving research, not a change by the seller. Even
+# EUR 100 comparison-price bands oscillate with different reference samples.
+# Use an acknowledged-only one-time migration when upgrading existing hashes.
+FINGERPRINT_REVISION = 2
+PENDING_REBASE = "0" * 64  # impossible normal SHA-256; private state sentinel
 
 BUSINESS_FIELDS = (
     "id", "source", "title", "year", "mileage_km",
@@ -71,14 +75,11 @@ def fingerprint(candidate, legacy=False):
                                    note.strip().startswith(REPAIR_NOTE_PREFIXES)})
             if repair_notes:
                 value["material_repair_notes"] = repair_notes
-        # Market median/resale can move slightly as the comparison sample
-        # rotates. Notify on a >=100 EUR *band* change, not every tiny shift;
-        # never treat unverified / missing values as demonstrated profit.
-        for field in MARKET_FIELDS:
-            amount = candidate.get(field)
-            if (type(amount) in (int, float) and math.isfinite(amount)
-                    and 0 < amount <= 1_000_000):
-                value[field + "_100eur_band"] = int((amount + 50) // 100) * 100
+        # Deliberately EXCLUDE computed market values, comparison sample size,
+        # image signed URLs and scanner time. A new comparison sample can move
+        # the median significantly even if the seller's offer is unchanged.
+        # Only the seller's own price/specs and material technical warnings
+        # should count as an update.
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
                          separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -89,10 +90,14 @@ def load(root):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {"schema": SCHEMA, "marktplaats": {}, "facebook": {}}
+        return {"schema": SCHEMA, "marktplaats": {}, "facebook": {},
+                "marktplaats_fingerprint_revision": FINGERPRINT_REVISION}
     if (not isinstance(data, dict) or data.get("schema") != SCHEMA or
             any(not isinstance(data.get(platform), dict) for platform in PLATFORMS)):
         raise ValueError("Invalid encrypted Hunter delivery checkpoint")
+    revision = data.get("marktplaats_fingerprint_revision", 1)
+    if type(revision) is not int or revision not in (1, FINGERPRINT_REVISION):
+        raise ValueError("Unsupported Hunter fingerprint checkpoint revision")
     for platform in PLATFORMS:
         for key, val in data[platform].items():
             if (not isinstance(key, str) or len(key) > 55 or
@@ -112,6 +117,16 @@ def plan(combined, platform, recorded):
     items = [x for x in combined["candidates"] if x.get("source") == platform]
     if len(items) > (100 if platform == "marktplaats" else 30) or len({x.get("id") for x in items}) != len(items):
         raise ValueError("Too many or duplicated Hunter advertisements")
+    # Existing PRIVATE encrypted checkpoints predate revision 2 and contain
+    # the old market-sensitive digest, not the old seller price. We cannot
+    # reconstruct that old price from a SHA256 digest. The one-time transition
+    # silently re-baselines already acknowledged IDs (but STILL delivers new
+    # IDs), rather than flooding AET Pro with every old car as "updated".
+    # An actual price change during that single transition will be observable
+    # on the next scan. Never migrate merely because this function ran:
+    # acknowledge() commits the new revision only after a Worker receipt.
+    upgrading = (platform == "marktplaats" and
+                 recorded.get("marktplaats_fingerprint_revision", 1) != FINGERPRINT_REVISION)
     changed, signatures, first, revised = [], {}, 0, 0
     for item in items:
         key = item["id"]
@@ -120,7 +135,8 @@ def plan(combined, platform, recorded):
         previous_sig = previous.get(key)
         if previous_sig == sig or (
                 platform == "marktplaats" and previous_sig is not None
-                and previous_sig == fingerprint(item, legacy=True)):
+                and (upgrading or previous_sig == PENDING_REBASE or
+                     previous_sig == fingerprint(item, legacy=True))):
             # Silently upgrade an unchanged older checkpoint to the new
             # normalized signature AFTER the Worker acknowledges the scan.
             continue
@@ -151,7 +167,18 @@ def acknowledge(root, platform, signatures, persist=lambda: None):
         raise ValueError("Invalid Hunter checkpoint update")
     state = load(root)
     merged = dict(state[platform])
+    if (platform == "marktplaats" and
+            state.get("marktplaats_fingerprint_revision", 1) != FINGERPRINT_REVISION):
+        # All earlier acknowledged IDs must be rebased lazily, including
+        # vehicles currently outside the top 100. Store a validated sentinel
+        # for unseen IDs, otherwise they would appear as a false "change" the
+        # first time they resurface weeks later.
+        merged = {key: PENDING_REBASE for key in merged}
     merged.update(signatures)
+    if platform == "marktplaats":
+        # The marker, pending IDs and updated signatures share ONE atomic
+        # private checkpoint; only a verified AET Pro receipt advances it.
+        state["marktplaats_fingerprint_revision"] = FINGERPRINT_REVISION
     # Old ads remain remembered to prevent resurfacing without meaningful
     # changes. Bound encrypted-cache growth independently for each platform.
     state[platform] = dict(list(merged.items())[-3000:])

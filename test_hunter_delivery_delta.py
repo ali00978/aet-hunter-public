@@ -183,34 +183,85 @@ class AcknowledgedDeltaTests(unittest.TestCase):
             self.assertEqual(repaired["count"], 1)
             self.assertEqual(stats["changed"], 1)
 
-    def test_material_market_value_change_not_comparison_noise(self):
+    def test_market_median_drift_does_not_relist_unchanged_cars(self):
         with tempfile.TemporaryDirectory() as tmp:
             initial = candidate(102)
-            first, signatures, _ = plan(
-                combined([initial]), "marktplaats", load(tmp))
-            self.assertEqual(first["count"], 1)
-            acknowledge(tmp, "marktplaats", signatures)
-            valued = {**initial, "median_comparable_asking_price_eur": 2500,
-                      "indicative_resale_eur": 2200}
-            valued_delta, signatures, stats = plan(
-                combined([valued]), "marktplaats", load(tmp))
-            self.assertEqual((valued_delta["count"], stats["changed"]), (1, 1))
-            acknowledge(tmp, "marktplaats", signatures)
-            small_sample_shift = {**valued,
-                                  "median_comparable_asking_price_eur": 2520,
-                                  "comparable_count": 5}
-            no_noise, _, _ = plan(
-                combined([small_sample_shift]), "marktplaats", load(tmp))
-            self.assertEqual(no_noise["count"], 0)
-            meaningful_shift = {**small_sample_shift,
-                                "median_comparable_asking_price_eur": 2710}
-            alert, signatures, _ = plan(
-                combined([meaningful_shift]), "marktplaats", load(tmp))
-            self.assertEqual(alert["count"], 1)
-            acknowledge(tmp, "marktplaats", signatures)
-            confidence_lost, _, _ = plan(
-                combined([initial]), "marktplaats", load(tmp))
-            self.assertEqual(confidence_lost["count"], 1)
+            _, saved, _ = plan(combined([initial]), "marktplaats", load(tmp))
+            acknowledge(tmp, "marktplaats", saved)
+            # Repeated scans may recompute entirely different comparisons.
+            # None of these observations changes a seller's actual offer.
+            for median in (2500, 2520, 2710, 2200, 3500, None):
+                valued = {**initial,
+                          "median_comparable_asking_price_eur": median,
+                          "indicative_resale_eur": 2200 if median else None,
+                          "comparable_count": 5}
+                quiet, _, stats = plan(
+                    combined([valued]), "marktplaats", load(tmp))
+                self.assertEqual(quiet["count"], 0)
+                self.assertEqual(stats["repeated"], 1)
+            # Real seller price drops and technical warning changes still
+            # trigger a new delivered update.
+            price_drop = {**initial, "asking_price_eur": 990,
+                          "median_comparable_asking_price_eur": 2710}
+            changed, _, stats = plan(
+                combined([price_drop]), "marktplaats", load(tmp))
+            self.assertEqual(changed["count"], 1)
+            self.assertEqual(stats["changed"], 1)
+
+    def test_legacy_market_hashes_rebase_only_after_ack_and_when_seen(self):
+        from hunter_delivery_delta import FINGERPRINT_REVISION, PENDING_REBASE
+        with tempfile.TemporaryDirectory() as tmp:
+            earlier = load(tmp)
+            earlier.pop("marktplaats_fingerprint_revision")
+            # Existing encrypted state may include ads outside this scan's
+            # top 100. They must not spam as updated when they resurface.
+            earlier["marktplaats"] = {
+                candidate(401)["id"]: "a"*64,
+                candidate(402)["id"]: "b"*64,
+                candidate(403)["id"]: "c"*64,
+            }
+            (Path(tmp) / FILE).write_text(json.dumps(earlier))
+            prior = load(tmp)
+            self.assertNotIn("marktplaats_fingerprint_revision", prior)
+            # Computing a delta must not mutate or permanently advance state.
+            packets, new_sigs, stats = plan(
+                combined([candidate(401), candidate(404)]),
+                "marktplaats", prior)
+            self.assertEqual(stats["new_to_delivery"], 1)
+            self.assertEqual(stats["changed"], 0)
+            self.assertEqual({x["id"] for x in packets["candidates"]},
+                             {candidate(404)["id"]})
+            self.assertEqual(load(tmp), earlier)
+            # Only AET Pro's accepted delivery authorizes migration.
+            acknowledge(tmp, "marktplaats", new_sigs)
+            updated = load(tmp)
+            self.assertEqual(updated["marktplaats_fingerprint_revision"],
+                             FINGERPRINT_REVISION)
+            self.assertEqual(updated["marktplaats"][candidate(402)["id"]],
+                             PENDING_REBASE)
+            self.assertEqual(updated["marktplaats"][candidate(403)["id"]],
+                             PENDING_REBASE)
+            self.assertEqual(updated["marktplaats"][candidate(401)["id"]],
+                             fingerprint(candidate(401)))
+            # Newly seen after migration, it is silently rebased once.
+            delayed, sign, stats = plan(
+                combined([candidate(402)]), "marktplaats", updated)
+            self.assertEqual(delayed["count"], 0)
+            self.assertEqual(stats["repeated"], 1)
+            acknowledge(tmp, "marktplaats", sign)
+            lower, _, stats = plan(
+                combined([candidate(402, price=900)]),
+                "marktplaats", load(tmp))
+            self.assertEqual(lower["count"], 1)
+            self.assertEqual(stats["changed"], 1)
+
+    def test_invalid_fingerprint_version_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = load(tmp)
+            state["marktplaats_fingerprint_revision"] = 99
+            (Path(tmp) / FILE).write_text(json.dumps(state))
+            with self.assertRaises(ValueError):
+                load(tmp)
 
     def test_facebook_fingerprint_unchanged_by_marktplaats_rule(self):
         facebook = {"id": "facebook:123456789", "source": "facebook",
@@ -245,10 +296,30 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         self.assertTrue(expected.issubset({x["id"] for x in updated["candidates"]}))
         picked, _, counts=plan({"schema":"aet-pro.hunter.v2",
                                 "candidates":updated["candidates"]},
-                               "marktplaats",{"marktplaats":known,"facebook":{}})
+                               "marktplaats",{"marktplaats":known,"facebook":{},
+                                                "marktplaats_fingerprint_revision":2})
         self.assertEqual(counts["new_to_delivery"],15)
         self.assertEqual(counts["repeated"],15)
         self.assertEqual(picked["count"],15)
+
+    def test_unseen_cars_not_hidden_by_legacy_market_hashes(self):
+        from hunter_pro_export import build_payload
+        rows = [self.raw(i) for i in range(80)]
+        feed = {"version": 1, "cars": rows}
+        # 60 acknowledged ads still have old market-sensitive fingerprints.
+        # Those must not fill the 30 outbound slots ahead of 20 new cars.
+        old = {"marktplaats:m"+str(10000+i): "a"*64 for i in range(60)}
+        export = build_payload(feed, known_fingerprints=old, limit=30)
+        unknown = {"marktplaats:m"+str(10000+i) for i in range(60, 80)}
+        self.assertTrue(unknown.issubset(
+            {row["id"] for row in export["candidates"]}))
+        self.assertEqual(export["count"],30)
+        # A pending legacy rebase must also never mask brand-new candidates.
+        from hunter_delivery_delta import PENDING_REBASE
+        pending = {key: PENDING_REBASE for key in old}
+        after = build_payload(feed, known_fingerprints=pending, limit=30)
+        self.assertTrue(unknown.issubset(
+            {row["id"] for row in after["candidates"]}))
 
     def test_price_drop_prioritized_and_unchanged_skipped(self):
         from hunter_pro_export import build_payload
@@ -259,7 +330,8 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         baseline=build_payload(feed,known_fingerprints=known)
         selected,_,counts=plan({"schema":"aet-pro.hunter.v2",
                                  "candidates":baseline["candidates"]},
-                                "marktplaats",{"marktplaats":known,"facebook":{}})
+                                "marktplaats",{"marktplaats":known,"facebook":{},
+                                                "marktplaats_fingerprint_revision":2})
         self.assertEqual(selected["count"],0)
         self.assertEqual(counts["repeated"],30)
         rows[29]={**rows[29],"price":1200,
@@ -268,7 +340,8 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         self.assertEqual(changed["candidates"][0]["id"],"marktplaats:m10029")
         picked,_,counts=plan({"schema":"aet-pro.hunter.v2",
                               "candidates":changed["candidates"]},
-                             "marktplaats",{"marktplaats":known,"facebook":{}})
+                             "marktplaats",{"marktplaats":known,"facebook":{},
+                                                "marktplaats_fingerprint_revision":2})
         self.assertEqual(picked["count"],1)
         self.assertEqual(counts["changed"],1)
 
