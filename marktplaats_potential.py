@@ -182,11 +182,11 @@ def _candidate(row, now, max_price):
             'potential_asking_price_eur':price if kind=='FIXED' and not search else None}
 
 def select_potential_candidates(research, search_cards, max_price=3000, limit=30, now=None):
-    """Pick up to 30 unique recent research cars; soft category quotas."""
+    """Pick a bounded unique research pool; preserve 30-card default and category quotas."""
     now = now or datetime.now(timezone.utc)
     if not _amount(max_price) or max_price < 350 or isinstance(limit,bool) or not isinstance(limit,int) or limit <= 0:
         return []
-    limit = min(limit,100)
+    limit = min(limit,300)
     unique = {}
     for raw in list(research or []) + list(search_cards or []):
         candidate = _candidate(raw,now,max_price)
