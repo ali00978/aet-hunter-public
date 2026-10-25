@@ -174,7 +174,13 @@ def acknowledge(root, platform, signatures, persist=lambda: None):
         # for unseen IDs, otherwise they would appear as a false "change" the
         # first time they resurface weeks later.
         merged = {key: PENDING_REBASE for key in merged}
-    merged.update(signatures)
+    # Acknowledged candidates that remain active must be the most recent
+    # entries in our bounded memory. dict.update() keeps an existing key in
+    # its old position, so routinely rescanned old cars would otherwise fall
+    # out of the 3,000-ID window and falsely look "new" months later.
+    for key, signature in signatures.items():
+        merged.pop(key, None)
+        merged[key] = signature
     if platform == "marktplaats":
         # The marker, pending IDs and updated signatures share ONE atomic
         # private checkpoint; only a verified AET Pro receipt advances it.
