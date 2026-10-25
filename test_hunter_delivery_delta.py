@@ -301,6 +301,25 @@ class BroaderOfflineCandidateSelectionTests(unittest.TestCase):
         self.assertEqual(counts["repeated"],15)
         self.assertEqual(picked["count"],15)
 
+    def test_unseen_cars_not_hidden_by_legacy_market_hashes(self):
+        from hunter_pro_export import build_payload
+        rows = [self.raw(i) for i in range(80)]
+        feed = {"version": 1, "cars": rows}
+        # 60 acknowledged ads still have old market-sensitive fingerprints.
+        # Those must not fill the 30 outbound slots ahead of 20 new cars.
+        old = {"marktplaats:m"+str(10000+i): "a"*64 for i in range(60)}
+        export = build_payload(feed, known_fingerprints=old, limit=30)
+        unknown = {"marktplaats:m"+str(10000+i) for i in range(60, 80)}
+        self.assertTrue(unknown.issubset(
+            {row["id"] for row in export["candidates"]}))
+        self.assertEqual(export["count"],30)
+        # A pending legacy rebase must also never mask brand-new candidates.
+        from hunter_delivery_delta import PENDING_REBASE
+        pending = {key: PENDING_REBASE for key in old}
+        after = build_payload(feed, known_fingerprints=pending, limit=30)
+        self.assertTrue(unknown.issubset(
+            {row["id"] for row in after["candidates"]}))
+
     def test_price_drop_prioritized_and_unchanged_skipped(self):
         from hunter_pro_export import build_payload
         rows=[self.raw(i) for i in range(30)]
