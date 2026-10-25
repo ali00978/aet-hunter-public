@@ -63,7 +63,7 @@ def receiver_marktplaats_limit(endpoint, opener=None):
                 and type(data.get("hunter_max_marktplaats_candidates")) is int
                 and data["hunter_max_marktplaats_candidates"] >= 100):
             return 100
-    except (OSError, ValueError, TypeError, UnicodeError):
+    except (OSError, ValueError, TypeError, UnicodeError, RuntimeError):
         return 30
     return 30
 
