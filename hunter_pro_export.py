@@ -97,12 +97,19 @@ def build_payload(feed, known_fingerprints=None, limit=30):
             entries.append(item);seen.add(item["id"])
         if len(entries)>=limit and known_fingerprints is None:break
     if known_fingerprints is not None:
-        from hunter_delivery_delta import fingerprint
-        # Stable Python sort retains the underlying quality rank within each
-        # group. Real price/details changes and brand-new listings rank first;
-        # unchanged listings retain their ranking and are filtered downstream.
-        entries.sort(key=lambda item:
-                     known_fingerprints.get(item["id"]) == fingerprint(item))
+        from hunter_delivery_delta import fingerprint, PENDING_REBASE
+        # Preserve source quality ranking *within* groups, but prefer genuine
+        # NEVER-DELIVERED adverts over changed adverts and acknowledged old
+        # adverts. This also protects new ads during the one-time fingerprint
+        # migration, when historic market-sensitive digests all differ.
+        def delivery_priority(item):
+            old = known_fingerprints.get(item["id"])
+            if old is None:
+                return 0  # genuinely new ID
+            if old == PENDING_REBASE or old == fingerprint(item):
+                return 2  # unchanged / safely pending first rebase
+            return 1  # materially changed (or old format still migrating)
+        entries.sort(key=delivery_priority)
     entries=entries[:limit]
     revision=hashlib.sha256(json.dumps(sorted((x["id"],x["content_hash"]) for x in entries),separators=(",",":")).encode()).hexdigest()
     return {"schema":FORMAT,"source":"aet-cars-ai-hunter","integration_mode":"offline_export_no_upload",
