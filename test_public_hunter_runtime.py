@@ -217,6 +217,17 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 runtime.run_platform(source, env=cfg)
 
 
+
+    def test_same_ids_with_updated_content_get_a_different_scan_identity(self):
+        old=[{"id":"marktplaats:m55001","content_hash":"a"*64},
+             {"id":"marktplaats:m55002","content_hash":"b"*64}]
+        revised=[{**old[0],"content_hash":"c"*64},old[1]]
+        from public_hunter_runtime import stable_marktplaats_batch_run_id as key
+        self.assertEqual(key("12345",old),key("12345",list(reversed(old))))
+        self.assertNotEqual(key("12345",old),key("12345",revised))
+        with self.assertRaises(ValueError):
+            key("12345",[{"id":"marktplaats:m55001","content_hash":"x"*64}])
+
     def test_batch_idempotency_is_bound_to_content_not_chunk_position(self):
         a={"id":"marktplaats:m10001"}
         b={"id":"marktplaats:m10002"}

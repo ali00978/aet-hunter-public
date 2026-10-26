@@ -616,6 +616,20 @@ def non_bid_price_coverage(visible, missing_fixed, missing_unknown):
     return round(100 * visible / expected, 1), expected >= 20 and missing * 5 >= expected
 
 
+
+def newly_found_affordable_search_card(url, checked_listing_ids,
+                                       acknowledged_delivery_ids):
+    """Exclude previously acknowledged adverts from query discovery yield.
+
+    'Not in the last 4,000 detail checks' does not mean NEW: the encrypted
+    60k-ID delivery history may still remember that car. Keep query rotation
+    focused on unseen budget cars instead of revisiting saturated results.
+    """
+    key = listing_id(url)
+    return (key not in checked_listing_ids and
+            "marktplaats:" + key not in acknowledged_delivery_ids)
+
+
 def historical_affordable_query_yield(base_query, metric_history):
     """Estimate useful search yield, not raw page or dealer listing volume."""
     observations = []
@@ -2964,7 +2978,8 @@ def main():
                         search_cards_skipped_over_budget += 1
                         skipped_on_page += 1
                         continue
-                    unseen_before_detail = listing_id(link) not in checked_listing_ids_for_search
+                    unseen_before_detail = newly_found_affordable_search_card(
+                        link, checked_listing_ids_for_search, delivered_to_pro)
                     affordable_private_card = (
                         not above_purchase_mileage and
                         fixed_or_unspecified and not financing_hint and
