@@ -282,7 +282,8 @@ class HunterTests(unittest.TestCase):
                   "seller_type":"particulier"} for u in selected+newly_seen}
         result, added=prioritize_undelivered_purchase_details(
             selected,groups,{}, {}, now, facts,
-            {u.rsplit("/",1)[-1].split("-")[0] for u in previous},
+            {"marktplaats:" + u.rsplit("/",1)[-1].split("-")[0]
+             for u in previous},
             5,priorities={u:(0,850) for u in facts})
         self.assertEqual(len(result),5)
         self.assertEqual(len({x.rsplit("/",1)[-1].split("-")[0] for x in result}),5)
@@ -290,6 +291,55 @@ class HunterTests(unittest.TestCase):
         self.assertGreaterEqual(added,3)
         self.assertEqual(prioritize_undelivered_purchase_details(
             selected,groups,{}, {}, now, facts,set(),5)[0],selected)
+
+
+    def test_confirmed_delivery_ids_use_production_prefix_not_bare_listing_id(self):
+        from scanner import prioritize_undelivered_purchase_details
+        from datetime import datetime, timezone
+        ts=datetime(2026,10,26,tzinfo=timezone.utc).timestamp()
+        def listing(i,slug="test"):
+            return f"https://www.marktplaats.nl/v/auto-s/opel/m{82000+i}-{slug}"
+        previous=[listing(i) for i in range(4)]
+        unseen=[listing(i) for i in range(4,10)]
+        # This exact prefix is what the encrypted Hunter delivery checkpoint
+        # actually stores; bare m-numbers masked the original production bug.
+        remembered={"marktplaats:m"+str(82000+i) for i in range(4)}
+        facts={x:{"price_type":"FIXED","price":900,
+                  "seller_type":"particulier"} for x in previous+unseen}
+        selected=previous+[unseen[0]]
+        output,added=prioritize_undelivered_purchase_details(
+            selected,[previous+unseen],{}, {}, ts, facts,remembered,5)
+        self.assertEqual(output[:4],unseen[:4])
+        self.assertGreaterEqual(added,3)
+        self.assertEqual(len(set(output)),5)
+        # A changed URL slug must still be recognized by its stable ID.
+        renamed=[listing(i,"updated") for i in range(4)]
+        renamed_facts={**facts,**{x:{"price_type":"FIXED","price":900,
+                                    "seller_type":"particulier"} for x in renamed}}
+        result,_=prioritize_undelivered_purchase_details(
+            renamed+[unseen[0]],[renamed+unseen],{}, {}, ts,
+            renamed_facts,remembered,5)
+        self.assertEqual(result[:4],unseen[:4])
+        self.assertEqual(len(set(result)),5)
+
+    def test_detail_refill_respects_cooldown_of_new_ads(self):
+        from scanner import prioritize_undelivered_purchase_details
+        from datetime import datetime, timezone
+        ts=datetime(2026,10,26,tzinfo=timezone.utc).timestamp()
+        def listing(i):
+            return f"https://www.marktplaats.nl/v/auto-s/opel/m{83000+i}-test"
+        old=[listing(1),listing(2),listing(3)]
+        blocked=listing(4)
+        ready=listing(5)
+        facts={url:{"price_type":"FIXED","price":900,
+                    "seller_type":"particulier"} for url in old+[blocked,ready]}
+        known={"marktplaats:m83001","marktplaats:m83002","marktplaats:m83003"}
+        result,added=prioritize_undelivered_purchase_details(
+            old,[old+[blocked,ready]],{}, {blocked:ts+5000},ts,
+            facts,known,3)
+        self.assertEqual(result[0],ready)
+        self.assertNotIn(blocked,result)
+        self.assertEqual(len(result),3)
 
     def test_detail_budget_is_fairly_spread_across_models(self):
         groups = [['a1', 'a2', 'a3', 'a4', 'a5'],
