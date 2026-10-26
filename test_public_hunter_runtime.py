@@ -216,6 +216,21 @@ class StandaloneRuntimeTests(unittest.TestCase):
             with self.subTest(source=source), self.assertRaises(ValueError):
                 runtime.run_platform(source, env=cfg)
 
+
+    def test_batch_idempotency_is_bound_to_content_not_chunk_position(self):
+        a={"id":"marktplaats:m10001"}
+        b={"id":"marktplaats:m10002"}
+        run="123456789"
+        both=runtime.stable_marktplaats_batch_run_id(run,[a,b])
+        self.assertEqual(both,runtime.stable_marktplaats_batch_run_id(run,[b,a]))
+        self.assertNotEqual(both,runtime.stable_marktplaats_batch_run_id(run,[b]))
+        self.assertNotEqual(both,runtime.stable_marktplaats_batch_run_id("123456790",[a,b]))
+        self.assertTrue(both.isascii() and both.isdigit())
+        self.assertLess(len(both),50)
+        for invalid in ([a,a],[{"id":"facebook:10001"}],[{"url":"secret"}]):
+            with self.assertRaises(ValueError):
+                runtime.stable_marktplaats_batch_run_id(run,invalid)
+
     def test_provider_spending_fails_closed(self):
         for env in ({"AET_APIFY_MONTHLY_BUDGET_USD":"0"}, {"AET_APIFY_MONTHLY_BUDGET_USD":"NaN"},
                     {"AET_APIFY_MONTHLY_BUDGET_USD":"2","AET_APIFY_MAX_CHARGE_USD":"NaN"}):
@@ -493,7 +508,9 @@ class StandaloneRuntimeTests(unittest.TestCase):
                    "AET_PRO_SYNC_URL":
                        "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
                    "AET_HUNTER_SYNC_TOKEN": "x"*26,
-                   "AET_HUNTER_STATE_DIR": folder}
+                   "AET_HUNTER_STATE_DIR": folder,
+                   "GITHUB_RUN_ID": "456789987",
+                   "GITHUB_RUN_ATTEMPT": "1"}
             items = [{"url": "https://www.marktplaats.nl/v/auto-s/opel/m"
                       + str(65432000+n) + "-test",
                       "title": "TEST Opel Corsa", "seller_type": "particulier",
@@ -519,10 +536,15 @@ class StandaloneRuntimeTests(unittest.TestCase):
                     runtime.run_platform("marktplaats", env=env)
                 self.assertEqual(len(__import__('hunter_delivery_delta').load(root)["marktplaats"]), 30)
                 accepted = set(attempts[0]["scan"]["candidate_ids"])
+                first_batch_scan_id = attempts[0]["scan"]["id"]
+                failed_tail_scan_id = attempts[1]["scan"]["id"]
+                self.assertNotEqual(first_batch_scan_id,failed_tail_scan_id)
                 attempts.clear()
                 self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
                 self.assertFalse(accepted & set(attempts[0]["scan"]["candidate_ids"]))
                 self.assertEqual(len(attempts[0]["scan"]["candidate_ids"]), 20)
+                self.assertEqual(attempts[0]["scan"]["id"],failed_tail_scan_id,
+                                 "Retry of the unsent tail must use its original id")
 
     def test_facebook_provider_snapshot_to_aet_pro_batch_without_network(self):
         import hunter_sync
