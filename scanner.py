@@ -2555,7 +2555,15 @@ def prioritize_undelivered_purchase_details(selected, groups, history, cooldown,
     selected = list(selected)[:limit]
     if not delivered_ids or not groups or limit <= 0:
         return selected, 0
-    delivered_ids = set(delivered_ids)
+    # Delivery checkpoints use "marktplaats:m123", whereas the scanner's
+    # listing_id(url) returns "m123". Compare the SAME canonical identity,
+    # not the raw strings: otherwise confirmed previous ads are promoted
+    # again at the expense of genuine discoveries.
+    delivered_ids = {
+        key[len("marktplaats:"):]
+        for key in delivered_ids
+        if isinstance(key, str) and re.fullmatch(r"marktplaats:[ma][0-9]+", key)
+    }
     facts = facts if isinstance(facts, dict) else {}
     eligible = select_diverse_detail_links(
         groups, history, cooldown, now_ts,
@@ -3202,6 +3210,14 @@ def main():
     checked_listing_ids_at_start = {listing_id(u) for u in last_checked}
     new_detail_links_planned = sum(listing_id(u) not in checked_listing_ids_at_start for u in detail_links)
     recheck_detail_links_planned = eligible_detail_links - new_detail_links_planned
+    # Distinguish new-to-scanner, new-to-delivery and old research checks.
+    # These aggregate counters require NO extra Marktplaats requests and
+    # contain no seller, vehicle, advert URL or other personal data.
+    new_delivery_detail_links_planned = sum(
+        "marktplaats:" + listing_id(link) not in delivered_to_pro
+        for link in detail_links)
+    already_delivered_detail_links_planned = (
+        eligible_detail_links - new_delivery_detail_links_planned)
     # Keep an honest, useful review queue even when recently checked detail
     # pages cannot be fetched again. This is NOT a verified deal list.
     review_path = Path('marktplaats_handmatig_controleren.json')
@@ -3761,6 +3777,8 @@ def main():
         'detail_count_before_refill': detail_count_before_refill,
         'new_detail_links_planned': new_detail_links_planned,
         'recheck_detail_links_planned': recheck_detail_links_planned,
+        'new_delivery_detail_links_planned': new_delivery_detail_links_planned,
+        'already_delivered_detail_links_planned': already_delivered_detail_links_planned,
         'starvation_rechecks': starvation_rechecks,
         'archive_priority_rechecks': len(archive_priority),
         'shortlist_refresh_scheduled': len(refresh_links),
