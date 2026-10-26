@@ -170,6 +170,52 @@ class AcknowledgedDeltaTests(unittest.TestCase):
             self.assertEqual(unchanged["count"], 0)
             self.assertEqual(stats["repeated"], 1)
 
+
+    def test_compact_old_id_survives_fingerprint_eviction_and_price_change(self):
+        from hunter_delivery_delta import delivered_ids, known_delivery_keys
+        with tempfile.TemporaryDirectory() as root:
+            state=load(root)
+            previous=candidate(101)
+            state["marktplaats"]={previous["id"]: fingerprint(previous)}
+            (Path(root)/FILE).write_text(json.dumps(state))
+            # Batch succeeded: remember confirmed IDs as compact encrypted state.
+            acknowledge(root,"marktplaats",
+                        {candidate(4000)["id"]: fingerprint(candidate(4000))})
+            saved=load(root)
+            self.assertIn(previous["id"],delivered_ids(saved))
+            # Simulate a much later rolling fingerprint checkpoint eviction.
+            saved["marktplaats"]={candidate(4000+i)["id"]:
+                                 fingerprint(candidate(4000+i))
+                                 for i in range(3000)}
+            (Path(root)/FILE).write_text(json.dumps(saved))
+            older=load(root)
+            self.assertNotIn(previous["id"],older["marktplaats"])
+            self.assertIn(previous["id"],known_delivery_keys(older))
+            refreshed=combined([candidate(101,price=350),
+                                candidate(9001,price=500)])
+            only_new,signatures,counts=plan(refreshed,"marktplaats",
+                                             older,new_only=True)
+            self.assertEqual([row["id"] for row in only_new["candidates"]],
+                             [candidate(9001)["id"]])
+            self.assertEqual(counts["new_to_delivery"],1)
+            self.assertNotIn(previous["id"],signatures)
+
+    def test_compact_registry_only_changes_after_confirmed_receipt(self):
+        from hunter_delivery_delta import delivered_ids
+        with tempfile.TemporaryDirectory() as root:
+            state=load(root)
+            batch,sigs,_=plan(combined([candidate(9009)]),
+                               "marktplaats",state,new_only=True)
+            self.assertEqual(batch["count"],1)
+            self.assertFalse(delivered_ids(load(root)))
+            acknowledge(root,"marktplaats",sigs)
+            self.assertIn(candidate(9009)["id"],delivered_ids(load(root)))
+            bad=load(root)
+            bad["marktplaats_delivered_ids"]=["marktplaats:m9009"]*2
+            (Path(root)/FILE).write_text(json.dumps(bad))
+            with self.assertRaises(ValueError):
+                load(root)
+
     def test_cross_platform_independent_and_corrupt_checkpoint_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             fb={"id":"facebook:234567890","source":"facebook",

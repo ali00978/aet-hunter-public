@@ -34,6 +34,10 @@ REPAIR_NOTE_PREFIXES = (
 # Use an acknowledged-only one-time migration when upgrading existing hashes.
 FINGERPRINT_REVISION = 2
 PENDING_REBASE = "0" * 64  # impossible normal SHA-256; private state sentinel
+# Compact lifetime history in encrypted state. The last 3,000 fingerprints are
+# retained for research-change comparisons, but older acknowledged IDs must
+# not be reclassified as newly discovered after a few busy weeks.
+MAX_DELIVERED_IDS = 60000
 
 BUSINESS_FIELDS = (
     "id", "source", "title", "year", "mileage_km",
@@ -85,6 +89,17 @@ def fingerprint(candidate, legacy=False):
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def delivered_ids(recorded):
+    """All confirmed Marktplaats IDs, including the compact older history."""
+    return (set(recorded.get("marktplaats_delivered_ids", ())) |
+            set(recorded.get("marktplaats", {})))
+
+
+def known_delivery_keys(recorded):
+    """Membership-only map for legacy offline export selectors."""
+    return dict.fromkeys(delivered_ids(recorded), PENDING_REBASE)
+
+
 def load(root):
     path = Path(root) / FILE
     try:
@@ -98,6 +113,13 @@ def load(root):
     revision = data.get("marktplaats_fingerprint_revision", 1)
     if type(revision) is not int or revision not in (1, FINGERPRINT_REVISION):
         raise ValueError("Unsupported Hunter fingerprint checkpoint revision")
+    known = data.get("marktplaats_delivered_ids", [])
+    if (not isinstance(known, list) or len(known) > MAX_DELIVERED_IDS
+            or len(known) != len(set(x for x in known if isinstance(x, str)))
+            or any(not isinstance(x, str) or len(x) > 55
+                   or re.fullmatch(r"marktplaats:[ma][0-9]+", x) is None
+                   for x in known)):
+        raise ValueError("Invalid Hunter long-term Marktplaats delivery history")
     for platform in PLATFORMS:
         for key, val in data[platform].items():
             if (not isinstance(key, str) or len(key) > 55 or
@@ -127,13 +149,14 @@ def plan(combined, platform, recorded, *, new_only=False):
     # acknowledge() commits the new revision only after a Worker receipt.
     upgrading = (platform == "marktplaats" and
                  recorded.get("marktplaats_fingerprint_revision", 1) != FINGERPRINT_REVISION)
+    known_ids = delivered_ids(recorded) if new_only and platform == "marktplaats" else set()
     changed, signatures, first, revised = [], {}, 0, 0
     for item in items:
         key = item["id"]
         # Never present an already confirmed Marktplaats ad as a NEW offer.
         # Repricing/rewording stays visible in historical research, not in the
         # new-discovery inbox. Facebook retains its existing delta semantics.
-        if new_only and platform == "marktplaats" and key in previous:
+        if new_only and platform == "marktplaats" and key in known_ids:
             continue
         sig = fingerprint(item)
         signatures[key] = sig
@@ -187,6 +210,20 @@ def acknowledge(root, platform, signatures, persist=lambda: None):
         merged.pop(key, None)
         merged[key] = signature
     if platform == "marktplaats":
+        # Preserve ever-acknowledged IDs even after their full 64-character
+        # fingerprints age out of the bounded 3,000-entry research cache.
+        # The compact history is encrypted together with the checkpoint;
+        # never construct it from merely observed/unsynced advertisements.
+        seen = dict.fromkeys(state.get("marktplaats_delivered_ids", ()))
+        for key in state["marktplaats"]:
+            if re.fullmatch(r"marktplaats:[ma][0-9]+", key):
+                seen.pop(key, None)
+                seen[key] = None
+        for key in signatures:
+            if re.fullmatch(r"marktplaats:[ma][0-9]+", key):
+                seen.pop(key, None)
+                seen[key] = None
+        state["marktplaats_delivered_ids"] = list(seen)[-MAX_DELIVERED_IDS:]
         # The marker, pending IDs and updated signatures share ONE atomic
         # private checkpoint; only a verified AET Pro receipt advances it.
         state["marktplaats_fingerprint_revision"] = FINGERPRINT_REVISION

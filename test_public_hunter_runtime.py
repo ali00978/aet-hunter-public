@@ -497,6 +497,45 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 self.assertEqual(runtime.run_platform("marktplaats", env=env), "synced")
                 self.assertEqual([len(x["scan"]["candidate_ids"]) for x in sent], [0])
 
+
+    def test_delivery_history_filters_new_pool_before_selection(self):
+        import hunter_feed
+        import hunter_sync
+        import scanner
+        from hunter_delivery_delta import load, acknowledge, fingerprint
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            old={"marktplaats:m"+str(50000+i):
+                 fingerprint({"id":"marktplaats:m"+str(50000+i),
+                              "source":"marktplaats"})
+                 for i in range(300)}
+            acknowledge(root,"marktplaats",old)
+            now=datetime.now(timezone.utc)
+            captured=[]
+            def scan():
+                (root/"marktplaats_status.json").write_text(json.dumps({
+                    "scan_health":"ok","checked_at":now.isoformat()}))
+            def build(*args,**kwargs):
+                captured.append(kwargs)
+                return {"version":1,"generated_at":now.isoformat(),
+                        "scan_checked_at":now.isoformat(),"cars":[]}
+            cfg={"AET_MODAL_LIVE_ENABLED":"I_ACCEPT_LIVE_SCANS",
+                 "AET_PRO_SYNC_URL":
+                   "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                 "AET_HUNTER_SYNC_TOKEN":"x"*26,
+                 "AET_HUNTER_STATE_DIR":folder}
+            with (patch.object(scanner,"main",side_effect=scan),
+                  patch.object(hunter_feed,"build",side_effect=build),
+                  patch.object(runtime,"receiver_marktplaats_limit",return_value=30),
+                  patch.object(hunter_sync,"send",return_value={"received":True})):
+                self.assertEqual(runtime.run_platform("marktplaats",env=cfg),
+                                 "synced")
+            self.assertEqual(len(captured),2)
+            self.assertNotIn("excluded_listing_ids",captured[0])
+            self.assertEqual(captured[1]["limit"],300)
+            self.assertIn("m50000",captured[1]["excluded_listing_ids"])
+            self.assertEqual(len(captured[1]["excluded_listing_ids"]),300)
+
     def test_partial_batch_failure_retains_first_batch_without_duplicates(self):
         import scanner
         import hunter_feed

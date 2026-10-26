@@ -2625,8 +2625,9 @@ def main():
     # Only the authenticated, acknowledged private delivery history defines
     # a repeat. Rechecking a previously delivered page can be useful for price
     # comparisons, but it must not crowd out new cheap cars this scan.
-    from hunter_delivery_delta import load as load_delivery_checkpoint
-    delivered_to_pro = set(load_delivery_checkpoint(Path.cwd())["marktplaats"])
+    from hunter_delivery_delta import (
+        load as load_delivery_checkpoint, delivered_ids)
+    delivered_to_pro = delivered_ids(load_delivery_checkpoint(Path.cwd()))
     # JSON booleans are integers in Python; never interpret them as expiry
     # timestamps or retry counts. Reject invalid persisted key types too.
     cooldown = {k: v for k, v in cooldown.items()

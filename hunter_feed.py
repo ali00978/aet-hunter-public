@@ -28,7 +28,7 @@ def _time(value):
     except (TypeError, ValueError, OverflowError):
         return None
 
-def build(now=None, max_price=3000, limit=30):
+def build(now=None, max_price=3000, limit=30, excluded_listing_ids=None):
     now = now or datetime.now(timezone.utc)
     one, two, state = _json(RESEARCH), _json(SEARCH), _json(STATUS)
     research = one if isinstance(one, list) else []
@@ -40,7 +40,8 @@ def build(now=None, max_price=3000, limit=30):
                          'count': len(data) if isinstance(data, list) else 0,
                          'valid': isinstance(data, list)}
     current = select_potential_candidates(research, search, max_price=max_price,
-                                          limit=limit, now=now)
+                                          limit=limit, now=now,
+                                          excluded_listing_ids=excluded_listing_ids)
     archived = False
     checked = _time(state.get('checked_at'))
     if not current:
@@ -52,7 +53,8 @@ def build(now=None, max_price=3000, limit=30):
         if latest is not None:
             current = select_potential_candidates(
                 research, search, max_price=max_price, limit=limit,
-                now=latest + timedelta(minutes=1))
+                now=latest + timedelta(minutes=1),
+                excluded_listing_ids=excluded_listing_ids)
             archived = bool(current)
     # No values are recomputed: the scanner's margins and strict shortlist
     # remain separate; the UI must not treat this broad list as purchase advice.

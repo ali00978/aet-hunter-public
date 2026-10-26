@@ -288,7 +288,9 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         # Load only acknowledged deliveries, BEFORE choosing the next 30
         # records. Already acknowledged top-100 ads must not conceal new cars
         # in positions 101-300 of the existing offline research archive.
-        from hunter_delivery_delta import load as load_delivered, plan, acknowledge
+        from hunter_delivery_delta import (
+            load as load_delivered, plan, acknowledge,
+            delivered_ids, known_delivery_keys)
         checkpoint = load_delivered(root)
         # Count only: the public Actions log must never disclose actual IDs,
         # prices, URLs or seller information. This shows whether encrypted
@@ -309,7 +311,15 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             mp_limit = receiver_marktplaats_limit(endpoint)
             print("marktplaats: ontvangercapaciteit_per_batch=" + str(mp_limit),
                   ", doel_nieuwe_autos=50", flush=True)
-            broader_mp_feed = hunter_feed.build(now=now, limit=300)
+            previously_sent = delivered_ids(checkpoint)
+            print("marktplaats: historisch_ontvangen_ids=" +
+                  str(len(previously_sent)), flush=True)
+            broader_mp_feed = hunter_feed.build(
+                now=now, limit=300,
+                excluded_listing_ids={
+                    key[len("marktplaats:"):] for key in previously_sent
+                    if key.startswith("marktplaats:")
+                })
             if broader_mp_feed.get("archived"):
                 # An empty healthy scan can fall back to previously saved
                 # research. Retain that private archive for inspection, but
@@ -318,7 +328,7 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                 broader_mp_feed = {**broader_mp_feed, "cars": [], "count": 0}
                 print("marktplaats: alleen_historisch_onderzoek; geen_nieuwe_leads",
                       flush=True)
-            previous_mp_signatures = checkpoint["marktplaats"]
+            previous_mp_signatures = known_delivery_keys(checkpoint)
         # Always write inside the PRIVATE temp state directory. Calling
         # write(now=now) would use the module's import-time default OUTPUT,
         # which can point into the public checkout on a GitHub runner.

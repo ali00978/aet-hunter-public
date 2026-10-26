@@ -181,18 +181,27 @@ def _candidate(row, now, max_price):
             'potential_fixed_asking_price':bool(kind=='FIXED' and not search),
             'potential_asking_price_eur':price if kind=='FIXED' and not search else None}
 
-def select_potential_candidates(research, search_cards, max_price=3000, limit=30, now=None):
-    """Pick a bounded unique research pool; preserve 30-card default and category quotas."""
+def select_potential_candidates(research, search_cards, max_price=3000, limit=30,
+                                now=None, excluded_listing_ids=None):
+    """Rank fresh research before the 300-card cap hides unsent vehicles.
+
+    Only the outbound delivery feed uses excluded IDs; the normal stored
+    research snapshot still includes historic ads for comparison and review.
+    No extra public searches and no historic offer is mislabelled as new.
+    """
     now = now or datetime.now(timezone.utc)
     if not _amount(max_price) or max_price < 350 or isinstance(limit,bool) or not isinstance(limit,int) or limit <= 0:
         return []
     limit = min(limit,300)
+    excluded_listing_ids = set(excluded_listing_ids or ())
     unique = {}
     for raw in list(research or []) + list(search_cards or []):
         candidate = _candidate(raw,now,max_price)
         if candidate is None:
             continue
         key = listing_id(candidate['url'])
+        if key in excluded_listing_ids:
+            continue
         old = unique.get(key)
         # A full detail beats a search hint for the same advert ID.
         if old is None or (old['potential_category']=='zoekkaart' and candidate['potential_category']!='zoekkaart') or (
