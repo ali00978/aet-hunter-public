@@ -47,6 +47,25 @@ class StandaloneRuntimeTests(unittest.TestCase):
                         {"seller_name":"private"}):
             self.assertIsNone(runtime.safe_scan_counters(invalid))
 
+
+    def test_public_discovery_telemetry_is_bounded_and_only_numeric(self):
+        counters={"new_detail_links_planned":44,
+                  "recheck_detail_links_planned":26,
+                  "new_delivery_detail_links_planned":61,
+                  "already_delivered_detail_links_planned":9,
+                  "seller_name":"PRIVATE NEVER LOG",
+                  "url":"https://example.invalid"}
+        self.assertEqual(runtime.safe_marktplaats_discovery_counts(counters),
+                         (44,26,61,9))
+        for bad in (
+                {**counters,"new_delivery_detail_links_planned":True},
+                {**counters,"already_delivered_detail_links_planned":-1},
+                {**counters,"new_detail_links_planned":146},
+                {**counters,"new_detail_links_planned":"44"},
+                {**counters,"already_delivered_detail_links_planned":10},
+                {}):
+            self.assertIsNone(runtime.safe_marktplaats_discovery_counts(bad))
+
     def test_delivery_checkpoint_continuity_reports_counts_only(self):
         existing = {"marktplaats": {
             "marktplaats:m123456": "0"*64,
