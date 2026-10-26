@@ -170,7 +170,7 @@ def durable_scan_identity(env):
 
 
 def stable_marktplaats_batch_run_id(run_id, candidates):
-    """Bind an idempotent GitHub scan identity to the exact candidate ID set.
+    """Bind an idempotent GitHub scan identity to the exact candidate content.
 
     If batch 1 was acknowledged but batch 2 failed, a same-run retry may now
     have batch 2 as its first (and only) outbound request. Never reuse the
@@ -182,15 +182,25 @@ def stable_marktplaats_batch_run_id(run_id, candidates):
         raise ValueError("Invalid Hunter run identity")
     if not isinstance(candidates, list):
         raise ValueError("Invalid Hunter batch")
-    ids = [item.get("id") for item in candidates if isinstance(item, dict)]
-    if (len(ids) != len(candidates) or any(
+    items = [(item.get("id"), item.get("content_hash"))
+             for item in candidates if isinstance(item, dict)]
+    ids = [key for key, _ in items]
+    if (len(items) != len(candidates) or any(
             not isinstance(key, str) or
-            not key.startswith("marktplaats:") for key in ids)
+            not key.startswith("marktplaats:") or
+            (digest is not None and (
+                not isinstance(digest, str) or len(digest) != 64 or
+                any(ch not in "0123456789abcdef" for ch in digest)))
+            for key, digest in items)
             or len(set(ids)) != len(ids)):
         raise ValueError("Invalid or duplicated Marktplaats batch identity")
     import hashlib
+    # Same IDs but different seller content must NOT reuse an earlier scan ID.
+    # Existing Worker idempotency requires identical scan IDs to mean the
+    # exact same payload. Missing digests are supported for older test data.
     digest = hashlib.sha256(json.dumps(
-        sorted(ids), separators=(",", ":")).encode("utf-8")).digest()
+        sorted((key, digest or "") for key, digest in items),
+        separators=(",", ":")).encode("utf-8")).digest()
     # 64-bit domain-specific numerical fingerprint, preserving leading zeroes.
     suffix = str(int.from_bytes(digest[:8], "big")).zfill(20)
     return run_id + suffix
