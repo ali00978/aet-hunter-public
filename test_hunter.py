@@ -169,6 +169,22 @@ class HunterTests(unittest.TestCase):
         self.assertEqual(set(chosen), {'first', 'better'})
 
 
+
+    def test_search_yield_excludes_older_already_delivered_ids(self):
+        from scanner import newly_found_affordable_search_card
+        previous="https://www.marktplaats.nl/v/auto-s/opel/m55001-corsa"
+        changed_slug="https://www.marktplaats.nl/v/auto-s/opel/m55001-updated"
+        never_seen="https://www.marktplaats.nl/v/auto-s/opel/m55002-corsa"
+        history={"marktplaats:m55001"}
+        self.assertFalse(newly_found_affordable_search_card(
+            previous,set(),history))
+        self.assertFalse(newly_found_affordable_search_card(
+            changed_slug,set(),history))
+        self.assertTrue(newly_found_affordable_search_card(
+            never_seen,set(),history))
+        self.assertFalse(newly_found_affordable_search_card(
+            never_seen,{"m55002"},set()))
+
     def test_search_card_price_recognition(self):
         self.assertEqual(search_card_signals('Opel Corsa € 1.250')['price'], 1250)
         self.assertEqual(search_card_signals('Opel Corsa EUR 1250')['price'], 1250)
