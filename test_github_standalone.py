@@ -23,6 +23,18 @@ ENV = {
 
 
 class GithubStandaloneTests(unittest.TestCase):
+    def test_legacy_large_marktplaats_state_can_be_unsealed(self):
+        # Older encrypted checkpoints may contain an uncompressed 5 MB JSON
+        # object. Authenticated restore must accept it within the 12 MB cap.
+        import base64
+        payload={"schema":"aet.hunter.state.v1","files":{
+            "marktplaats_proefresultaten.json":{"cars":[{"description":"x"*5_000_000}]}}}
+        with patch.object(gh,"_key",return_value=b"x"*32):
+            ciphertext=gh.seal(payload,TOKEN)
+            restored=gh.unseal(ciphertext,TOKEN)
+        self.assertEqual(len(restored["files"]["marktplaats_proefresultaten.json"]
+                             ["cars"][0]["description"]),5_000_000)
+
     def test_owner_and_event_permissions(self):
         for name, value in (
             ("AET_PUBLIC_HUNTER_ENABLED", "false"),

@@ -132,7 +132,12 @@ def unseal(blob, token):
     for name, value in result["files"].items():
         if not isinstance(name, str) or not isinstance(value, (dict, list)):
             raise ValueError("Invalid decrypted record structure")
-        if len(json.dumps(value, allow_nan=False).encode("utf-8")) > FILE_LIMIT:
+        # Historical uncompressed Marktplaats JSON may legitimately be up to
+        # 12 MB. Check the source-specific bound here as well as in the
+        # collection path; otherwise a valid older cache cannot be restored.
+        limit = (MARKTPLAATS_FILE_LIMIT if name.startswith("marktplaats_")
+                 and MP_COMPRESSION_TAG not in value else FILE_LIMIT)
+        if len(json.dumps(value, allow_nan=False).encode("utf-8")) > limit:
             raise ValueError("Decrypted state file size exceeds limit")
     return result
 
