@@ -168,6 +168,34 @@ def durable_scan_identity(env):
     return str(time.time_ns()), "1"
 
 
+
+def stable_marktplaats_batch_run_id(run_id, candidates):
+    """Bind an idempotent GitHub scan identity to the exact candidate ID set.
+
+    If batch 1 was acknowledged but batch 2 failed, a same-run retry may now
+    have batch 2 as its first (and only) outbound request. Never reuse the
+    original batch-1 scan ID for that different payload. Identical retries
+    keep the same ID even when a batch moves to a different index.
+    Only digits are used to preserve the current sync envelope contract.
+    """
+    if not isinstance(run_id, str) or not run_id.isascii() or not run_id.isdigit():
+        raise ValueError("Invalid Hunter run identity")
+    if not isinstance(candidates, list):
+        raise ValueError("Invalid Hunter batch")
+    ids = [item.get("id") for item in candidates if isinstance(item, dict)]
+    if (len(ids) != len(candidates) or any(
+            not isinstance(key, str) or
+            not key.startswith("marktplaats:") for key in ids)
+            or len(set(ids)) != len(ids)):
+        raise ValueError("Invalid or duplicated Marktplaats batch identity")
+    import hashlib
+    digest = hashlib.sha256(json.dumps(
+        sorted(ids), separators=(",", ":")).encode("utf-8")).digest()
+    # 64-bit domain-specific numerical fingerprint, preserving leading zeroes.
+    suffix = str(int.from_bytes(digest[:8], "big")).zfill(20)
+    return run_id + suffix
+
+
 def provider_status_label(status):
     """Safe aggregate information only, never attacker-supplied strings."""
     if not isinstance(status,dict):
@@ -334,9 +362,12 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             batch["revision"] = hashlib.sha256(json.dumps(
                 sorted((car["id"], car["content_hash"]) for car in chunk),
                 separators=(",", ":")).encode("utf-8")).hexdigest()
-            # The first batch preserves the existing stable ID for backwards
-            # compatibility. A second one has a distinct deterministic ID.
-            chunk_id = run_id if index == 0 else run_id + "0" + str(index)
+            # Associate the scan ID with the actual candidate set, NOT its
+            # ordinal slot. After partial success a tail batch may become
+            # chunk zero on retry. Reusing the old chunk-zero ID could make
+            # the receiver silently treat those unsent cars as duplicates.
+            chunk_id = (stable_marktplaats_batch_run_id(run_id, chunk)
+                        if platform == "marktplaats" else run_id)
             package = hunter_sync.envelope(
                 source, chunk_id, attempt, now=now,
                 combined=batch, source_status=status)
