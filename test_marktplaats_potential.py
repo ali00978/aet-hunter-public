@@ -25,6 +25,30 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(broad[0]["potential_rank"],1)
         self.assertEqual(broad[-1]["potential_rank"],300)
 
+
+    def test_delivery_filter_applied_before_300_research_limit(self):
+        """An old top-300 cannot conceal 55 eligible cars ranked below it."""
+        rows=[self.car(15000+i,price=900) for i in range(355)]
+        old={"m"+str(15000+i) for i in range(300)}
+        outgoing=select_potential_candidates(
+            rows,[],limit=300,now=self.now,excluded_listing_ids=old)
+        self.assertEqual(len(outgoing),55)
+        self.assertEqual(len({r["url"] for r in outgoing}),55)
+        self.assertFalse(old & {"m"+r["url"].split("/m")[-1].split("-")[0]
+                                for r in outgoing})
+        # Legacy inspection view MUST retain its independent ranking.
+        normal=select_potential_candidates(rows,[],limit=30,now=self.now)
+        self.assertEqual(len(normal),30)
+
+    def test_delivery_filter_uses_stable_listing_id_after_slug_rename(self):
+        first=self.car(90801,price=850)
+        changed={**first,"url":first["url"].replace("-corsa","-new-slug"),
+                 "price":700}
+        result=select_potential_candidates(
+            [changed],[],limit=50,now=self.now,
+            excluded_listing_ids={"m90801"})
+        self.assertEqual(result,[])
+
     def test_30_unique_even_when_forty_listings_exist(self):
         rows=[self.car(1000+i,price=900+i*20) for i in range(40)]
         results=select_potential_candidates(rows,[],now=self.now)
