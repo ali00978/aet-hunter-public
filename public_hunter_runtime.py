@@ -121,6 +121,26 @@ def safe_scan_counters(status):
     return tuple(values)
 
 
+
+def safe_marktplaats_discovery_counts(status):
+    """Public Actions logs contain bounded COUNTS, never private listings."""
+    if not isinstance(status, dict):
+        return None
+    fields = ("new_detail_links_planned", "recheck_detail_links_planned",
+              "new_delivery_detail_links_planned",
+              "already_delivered_detail_links_planned")
+    values = []
+    for name in fields:
+        value = status.get(name)
+        if type(value) is not int or not 0 <= value <= 145:
+            return None
+        values.append(value)
+    if (values[0] + values[1] !=
+            values[2] + values[3]):
+        return None
+    return tuple(values)
+
+
 def checkpoint_history_count(checkpoint, platform):
     """Only return a validated count, never an encrypted-state car identifier."""
     if platform not in ("marktplaats", "facebook") or not isinstance(checkpoint, dict):
@@ -209,6 +229,13 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                 print("marktplaats: pagina's=" + str(totals[0]) +
                       ", advertenties=" + str(totals[1]) +
                       ", verzoeken=" + str(totals[2]), flush=True)
+            diagnostics = safe_marktplaats_discovery_counts(status)
+            if diagnostics:
+                print("marktplaats: nooit_eerder_geopend=" + str(diagnostics[0]) +
+                      ", hercontrole=" + str(diagnostics[1]) +
+                      ", nog_niet_doorgestuurd=" + str(diagnostics[2]) +
+                      ", al_eerder_doorgestuurd=" + str(diagnostics[3]),
+                      flush=True)
             healthy = status.get("scan_health") == "ok"
         else:
             from public_apify_collector import collect
