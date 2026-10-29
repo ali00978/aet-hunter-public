@@ -48,6 +48,24 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertIsNone(runtime.safe_scan_counters(invalid))
 
 
+    def test_research_funnel_counters_reject_untrusted_or_inconsistent_data(self):
+        values={'source_records':9,'eligible':4,'stale':1,'dealer':1,
+                'technical_risk':1,'price_ineligible':2,
+                'previously_delivered':1,'duplicate':1,
+                'unique_after_filter':2,'selected':2,
+                'selected_unknown_seller':1,'selected_search_cards':0}
+        self.assertEqual(
+            runtime.safe_marktplaats_research_counts({'research_diagnostics':values}),
+            {**dict.fromkeys(('invalid_or_excluded','vehicle_warnings',
+                              'unverified_seller_bid'),0),**values})
+        for modified in ({**values,'source_records':8},
+                         {**values,'dealer':True},
+                         {**values,'selected_search_cards':2},
+                         {**values,'stale':20001}):
+            self.assertIsNone(runtime.safe_marktplaats_research_counts(
+                {'research_diagnostics':modified}))
+        self.assertIsNone(runtime.safe_marktplaats_research_counts({}))
+
     def test_public_discovery_telemetry_is_bounded_and_only_numeric(self):
         counters={"new_detail_links_planned":44,
                   "recheck_detail_links_planned":26,
