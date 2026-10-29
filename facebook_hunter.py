@@ -49,8 +49,10 @@ LOCAL_HINTS = (
     "emmelord", "nijkerk", "amersfoort",
 )
 def has_word(text, word):
-    """Match a whole model/brand/place term, never embedded text fragments."""
-    return bool(re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text))
+    """Match whole case-insensitive model/brand/place terms, never fragments."""
+    text = str(text or "").casefold()
+    word = str(word or "").casefold()
+    return bool(word and re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text))
 
 def is_trade_model(title):
     """Never mix unrelated brands into this dealership's 16-brand shortlist."""
