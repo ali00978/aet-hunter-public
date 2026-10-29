@@ -133,6 +133,59 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fb.find_candidates(now=self.now,known_delivery_ids=["facebook:123"])
 
+    def test_newer_facebook_source_overrules_old_rich_price_and_photo(self):
+        from datetime import timedelta
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            old={**self.good, "price":650, "mileage_km":90000,
+                 "year":2012, "checked_at":(self.now-timedelta(days=2)).isoformat(),
+                 "photoUrl":"https://scontent.xx.fbcdn.net/v/test/old-car.jpg"}
+            new={**self.good, "price":1950,"mileage_km":None,
+                 "checked_at":self.now.isoformat(),"year":None}
+            (root/"apify_kandidaten.json").write_text(json.dumps([new]))
+            (root/"socialfetch_kandidaten.json").write_text(json.dumps([old]))
+            for name in ("apify_status.json","socialfetch_status.json"):
+                (root/name).write_text(json.dumps(
+                    {"status":"ok","checked_at":self.now.isoformat()}))
+            with patch.object(fb,"ROOT",root):
+                result=fb.find_candidates(now=self.now)
+            self.assertEqual(result["count"],1)
+            self.assertEqual(result["candidates"][0]["search_card_hint_eur"],1950)
+            self.assertEqual(result["candidates"][0]["photo_urls"],[])
+            self.assertEqual(result["candidates"][0]["mileage_km"],None)
+
+    def test_cross_timezone_facebook_source_ranking_uses_actual_utc_time(self):
+        # 16:00+02:00 is 14:00 UTC, older than 14:30+00:00, despite
+        # the lexicographically larger clock hour.
+        moment=datetime(2026,10,29,15,0,tzinfo=timezone.utc)
+        older={**self.good,"price":650,
+               "checked_at":"2026-10-29T16:00:00+02:00"}
+        fresher={**self.good,"price":1950,
+                 "checked_at":"2026-10-29T14:30:00+00:00"}
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for name,rows in (("apify_kandidaten.json",[older]),
+                              ("socialfetch_kandidaten.json",[fresher])):
+                (root/name).write_text(json.dumps(rows))
+            for name in ("apify_status.json","socialfetch_status.json"):
+                (root/name).write_text(json.dumps(
+                    {"status":"ok","checked_at":moment.isoformat()}))
+            with patch.object(fb,"ROOT",root):
+                result=fb.find_candidates(now=moment)
+            self.assertEqual(result["candidates"][0]["search_card_hint_eur"],1950)
+
+    def test_sold_and_nonstandard_facebook_ports_are_not_exported(self):
+        for modification in (
+            {"isSold":True}, {"isPending":True},
+            {"url":"https://www.facebook.com:444/marketplace/item/11111111111/"},
+            {"url":"https://www.facebook.com:invalid/marketplace/item/11111111111/"},
+        ):
+            self.assertIsNone(fb.normalize({**self.good,**modification},
+                                           "Apify",self.now))
+        self.assertIsNotNone(fb.normalize(
+            {**self.good,"url":"https://www.facebook.com:443/marketplace/item/11111111111/"},
+            "Apify",self.now))
+
     def test_sources_and_duplicates(self):
         with tempfile.TemporaryDirectory() as path:
             root=Path(path)
