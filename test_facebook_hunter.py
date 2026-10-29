@@ -255,6 +255,31 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         self.assertIsNone(fb.normalize({**self.good,"priceFormatted":"$1,200"},"Apify",self.now))
         self.assertIsNotNone(fb.normalize({**self.good,"currency":"EUR"},"Apify",self.now))
 
+    def test_minor_repair_gets_a_cautious_penalty_not_major_engine_failure(self):
+        good={**self.good,"title":"Renault Clio 2011","price":1100,
+              "mileage_km":165000,"seller_type":"particulier"}
+        healthy=fb.normalize({**good,"description":"De auto rijdt goed"},
+                             "Apify",self.now)
+        airco=fb.normalize({**good,"description":"Airco kapot; verder rijdt de auto goed"},
+                           "Apify",self.now)
+        window=fb.normalize({**good,"title":"Renault Clio 2011 lakschade"},
+                            "Apify",self.now)
+        self.assertIsNotNone(airco)
+        self.assertGreater(airco["score"],24)
+        self.assertLess(airco["score"],healthy["score"])
+        self.assertEqual(airco["score"],window["score"])
+        self.assertTrue(any("Klein herstelpunt" in warning
+                            for warning in airco["issues"]))
+        self.assertTrue(airco["needs_inspection"])
+        self.assertIsNone(airco["confirmed_profit_eur"])
+        severe=fb.normalize({**good,
+                             "title":"Renault Clio 2011 motorstoring"},
+                            "Apify",self.now)
+        self.assertLessEqual(severe["score"],24)
+        self.assertLess(severe["score"],airco["score"])
+        self.assertTrue(any("ernstig technisch risico" in warning
+                            for warning in severe["issues"]))
+
     def test_description_mechanical_warning_reduces_priority(self):
         healthy=fb.normalize({**self.good,"seller_type":"particulier",
                              "mileage_km":110000},"Apify",self.now)
