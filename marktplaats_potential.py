@@ -78,9 +78,15 @@ def _candidate(row, now, max_price):
     if vehicle_facts(row).get('vehicle_data_warnings'):
         return None
     seller = seller_evidence(row)['seller_type']
-    if seller == 'handelaar' or (seller != 'particulier' and not search):
+    if seller == 'handelaar':
         return None
     kind, price = row.get('price_type'), row.get('price')
+    # A missing private-seller signal does NOT prove a business seller.
+    # Keep a bounded fallback of complete, fixed-price vehicle detail pages
+    # for manual research, never bid-only pages with unknown seller identity.
+    # Dealer names/descriptions are still rejected by seller_evidence().
+    if not search and seller == 'onbekend' and kind != 'FIXED':
+        return None
     if search:
         if not _amount(price) or not 350 <= price <= max_price:
             return None
@@ -98,6 +104,8 @@ def _candidate(row, now, max_price):
     else:
         return None
     notes = []
+    if not search and seller == 'onbekend':
+        notes.append('Verkoperstype niet vastgesteld: controleer of het een particulier betreft voordat je contact opneemt')
     if not search:
         reserve, _ = extra_repair_reserve(row)
         if reserve:
@@ -143,7 +151,7 @@ def _candidate(row, now, max_price):
     # A superficial 15% asking-price discount often disappears after
     # resale haircut + transport + repairs. Only calculated scenarios may
     # enter the first tier; repairs and weak evidence remain manual research.
-    strong = (evidence is not None and enough_details
+    strong = (seller == 'particulier' and evidence is not None and enough_details
               and category == 'vaste_prijs'
               and evidence['net_eur'] >= evidence['target_eur'])
     tier = ('sterke_marge_na_controle' if strong else
@@ -162,10 +170,17 @@ def _candidate(row, now, max_price):
     # Unverified but cost-supported candidates deserve review before
     # unknown-market entries; entries with nonpositive margin rank last.
     # None of these tiers is proof of achievable resale proceeds.
+    # Private listings remain preferred. Unknown sellers are research only,
+    # deliberately ranked after every confirmed non-business private offer;
+    # an attractive price alone never promotes an unverified seller as a deal.
     priority = (0 if strong else
-                1 if evidence is not None and evidence['net_eur'] >= evidence['target_eur'] else
-                2 if evidence is not None and evidence['net_eur'] > 0 else
-                3 if evidence is None else 4)
+                1 if seller == 'particulier' and evidence is not None
+                     and evidence['net_eur'] >= evidence['target_eur'] else
+                2 if seller == 'particulier' and evidence is not None
+                     and evidence['net_eur'] > 0 else
+                3 if seller == 'particulier' and evidence is None else
+                4 if seller == 'particulier' else
+                5 if evidence is None or evidence['net_eur'] > 0 else 6)
     rank = (priority, 0 if compared else 1,
             0 if kind == 'FIXED' and price <= 2000 else 1,
             0 if discount >= .15 else 1,
