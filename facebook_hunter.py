@@ -40,8 +40,17 @@ OTHER_MAKES = (
 TECHNICAL_WARNINGS = (
     "motorstoring", "koppakking", "olie verbruik", "olieverbruik",
     "koelvloeistof verlies", "koelvloeistofverlies", "slipt",
-    "automaat kapot", "airco kapot", "motor tikt", "motor ratelt",
+    "automaat kapot", "motor tikt", "motor ratelt",
     "rookt", "distributie defect", "versnellingsbak probleem",
+)
+# Light repair work is possible for this trading profile, but a provider
+# description never proves the repair is cheap or the car is roadworthy.
+# Keep these signals separate from major powertrain/mechanical faults.
+MINOR_REPAIR_WARNINGS = (
+    "airco kapot", "airco defect", "airco werkt niet",
+    "raam werkt niet", "raammechanisme kapot",
+    "centrale vergrendeling defect", "lakschade", "kleine deuk",
+    "bumper schade", "bumper krassen", "bumper krasjes",
 )
 LOCAL_HINTS = (
     "dronten", "almere", "lelystad", "zeewolde", "kampen",
@@ -102,10 +111,17 @@ def trading_score(title, price, year, mileage, seller, photos, posted, location,
     if year is not None and year <= 2003 and price > 1400:
         score -= 12
         signals.append("Hoge vraagprijs voor vroege generatie: controle vereist")
-    desc = str(description or "").casefold()
-    if any(word in desc for word in TECHNICAL_WARNINGS):
+    # Sellers often disclose a defect in the TITLE, not the description.
+    # Never let an attractive model/price hide a serious mechanical warning.
+    observed_text = text + "\n" + str(description or "").casefold()
+    if any(word in observed_text for word in TECHNICAL_WARNINGS):
         score = min(score, 24)
-        signals.append("Beschrijving vermeldt mogelijk technisch risico")
+        signals.append("Advertentie vermeldt mogelijk ernstig technisch risico")
+    elif any(word in observed_text for word in MINOR_REPAIR_WARNINGS):
+        # Cosmetic/airco/window repairs deserve manual investigation, not
+        # the same severe motor-failure penalty. Repair costs are unknown.
+        score -= 8
+        signals.append("Klein herstelpunt genoemd: diagnose en kosten eerst controleren")
     return max(0,min(100,score)),signals
 
 def data(file):
