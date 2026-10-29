@@ -55,12 +55,18 @@ def combine(mp_feed,facebook_feed,now=None,known_mp_fingerprints=None,mp_limit=3
         },
         "candidates":items,
     }
-def build(now=None,mp_feed=None,known_mp_fingerprints=None,mp_limit=30):
+def build(now=None,mp_feed=None,known_mp_fingerprints=None,mp_limit=30,
+          known_fb_ids=None):
     from hunter_feed import build as build_mp_feed
     now=now or datetime.now(timezone.utc)
-    return combine(mp_feed if mp_feed is not None else build_mp_feed(now=now),find_candidates(now=now),now=now,known_mp_fingerprints=known_mp_fingerprints,mp_limit=mp_limit)
-def write(path=OUTPUT,now=None,mp_feed=None,known_mp_fingerprints=None,mp_limit=30):
-    result=build(now=now,mp_feed=mp_feed,known_mp_fingerprints=known_mp_fingerprints,mp_limit=mp_limit)
+    return combine(
+        mp_feed if mp_feed is not None else build_mp_feed(now=now),
+        find_candidates(now=now,known_delivery_ids=known_fb_ids),now=now,
+        known_mp_fingerprints=known_mp_fingerprints,mp_limit=mp_limit)
+def write(path=OUTPUT,now=None,mp_feed=None,known_mp_fingerprints=None,mp_limit=30,
+          known_fb_ids=None):
+    result=build(now=now,mp_feed=mp_feed,known_mp_fingerprints=known_mp_fingerprints,
+                 mp_limit=mp_limit,known_fb_ids=known_fb_ids)
     destination=Path(path)
     destination.parent.mkdir(parents=True,exist_ok=True)
     temporary=None
