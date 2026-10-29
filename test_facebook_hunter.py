@@ -86,6 +86,53 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         result=fb.normalize(row,"Social Fetch",self.now)
         self.assertEqual(result["search_card_hint_eur"],850)
         self.assertEqual(result["price_type"],"provider_price_unverified")
+    def test_new_delivery_facebook_ads_get_first_thirty_slots_from_saved_pool(self):
+        # Previous top-ranked, acknowledged ads must not conceal unseen cars
+        # at positions 31..65. No provider or network request occurs.
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            rows=[]
+            for number in range(70):
+                car={**self.good,
+                     "url":"https://www.facebook.com/marketplace/item/"
+                           +str(880000+number)+"/",
+                     "title":"Toyota Aygo 2012",
+                     "seller_type":"particulier"}
+                if number>=30:
+                    car["price"]=1350
+                    car["mileage_km"]=240000
+                else:
+                    car["price"]=650
+                    car["mileage_km"]=95000
+                rows.append(car)
+            (root/"apify_kandidaten.json").write_text(
+                json.dumps(rows),encoding="utf-8")
+            (root/"apify_status.json").write_text(
+                json.dumps({"status":"ok","checked_at":self.now.isoformat()}),
+                encoding="utf-8")
+            known={"facebook:"+str(880000+i) for i in range(30)}
+            with patch.object(fb,"ROOT",root):
+                original=fb.find_candidates(now=self.now)
+                first=fb.find_candidates(
+                    now=self.now,known_delivery_ids=known)
+                next_round=fb.find_candidates(
+                    now=self.now,known_delivery_ids=known |
+                    {row["id"] for row in first["candidates"]})
+            self.assertEqual(len(original["candidates"]),30)
+            self.assertEqual(set(row["id"] for row in original["candidates"]),known)
+            self.assertEqual(len(first["candidates"]),30)
+            self.assertFalse(known & {row["id"] for row in first["candidates"]})
+            self.assertEqual(len(next_round["candidates"]),30)
+            self.assertFalse((known | {row["id"] for row in first["candidates"]})
+                             & {row["id"] for row in next_round["candidates"][:10]})
+            self.assertEqual(len({row["id"] for row in first["candidates"]}),30)
+
+    def test_facebook_unsent_priority_rejects_invalid_history_and_cap(self):
+        with self.assertRaises(ValueError):
+            fb.find_candidates(now=self.now,limit=31)
+        with self.assertRaises(ValueError):
+            fb.find_candidates(now=self.now,known_delivery_ids=["facebook:123"])
+
     def test_sources_and_duplicates(self):
         with tempfile.TemporaryDirectory() as path:
             root=Path(path)
