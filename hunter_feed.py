@@ -71,6 +71,7 @@ def build(now=None, max_price=3000, limit=30, excluded_listing_ids=None):
                'indicative_resale_eur','estimated_costs_allowance_eur',
                'potential_rank','potential_category','potential_category_label',
                'potential_display_price','potential_notes',
+               'potential_seller_review_required','potential_trade_tier',
                'potential_checked_at')
     return {'version':1,'generated_at':now.isoformat(),
             'scan_checked_at':state.get('checked_at'),
