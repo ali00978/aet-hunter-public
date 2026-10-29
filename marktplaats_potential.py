@@ -107,20 +107,25 @@ def _candidate(row, now, max_price, diagnostics=None):
         price_label = f'Bieden vanaf €{floor:,.0f}' if floor else 'Vraagprijs onbekend'
     else:
         return reject('price_ineligible')
+    # Seller verification and mechanical repairs are independent dimensions:
+    # an unknown private-seller classification is NOT a defect on the car.
     notes = []
-    if not search and seller == 'onbekend':
+    seller_review_required = not search and seller == 'onbekend'
+    if seller_review_required:
         notes.append('Verkoperstype niet vastgesteld: controleer of het een particulier betreft voordat je contact opneemt')
     if not search:
+        repair_notes = []
         reserve, _ = extra_repair_reserve(row)
         if reserve:
-            notes.append('Airco werkt mogelijk niet: diagnose en herstelkosten eerst controleren')
+            repair_notes.append('Airco werkt mogelijk niet: diagnose en herstelkosten eerst controleren')
         if MINOR_RE.search(text):
-            notes.append('Cosmetisch/elektrisch herstelpunt: controleer omvang en kosten')
+            repair_notes.append('Cosmetisch/elektrisch herstelpunt: controleer omvang en kosten')
         if row.get('apk_status') == 'verloopt_binnen_30_dagen':
-            notes.append('APK loopt af: mogelijke herstelkosten controleren')
-        if row.get('repair_review_required') and not notes:
-            notes.append('Door scanner gemeld herstelpunt: inspectie nodig')
-        if notes:
+            repair_notes.append('APK loopt af: mogelijke herstelkosten controleren')
+        if row.get('repair_review_required') and not repair_notes:
+            repair_notes.append('Door scanner gemeld herstelpunt: inspectie nodig')
+        if repair_notes:
+            notes.extend(repair_notes)
             category = 'klein_herstel'
     comparison = row.get('market_comparison')
     comparison = comparison if isinstance(comparison, dict) else {}
@@ -196,6 +201,7 @@ def _candidate(row, now, max_price, diagnostics=None):
             'potential_display_price':price_label, 'potential_notes':notes,
             'potential_model_key':model_key, 'potential_sort':rank,
             'potential_trade_tier':tier,
+            'potential_seller_review_required':seller_review_required,
             'potential_net_margin_eur':evidence['net_eur'] if evidence is not None else None,
             'potential_target_margin_eur':evidence['target_eur'] if evidence is not None else None,
             'potential_checked_at':stamp.isoformat(),
