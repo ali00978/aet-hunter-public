@@ -57,6 +57,18 @@ def candidate(row,archive=False):
     issues=issues if isinstance(issues,list) else []
     year=row.get("year") or row.get("year_detected")
     if not isinstance(year,int) or isinstance(year,bool) or not 1950<=year<=2030:year=None
+    # Search-card and detail pipelines can contain both an image list and
+    # a separate cover. Preserve either safe image, even if the list contains
+    # stale/invalid URLs. photo_urls() validates origin and removes duplicates.
+    images=row.get("image_urls")
+    if isinstance(images, (list,tuple)):
+        photo_sources=list(images[:30])
+    elif images is not None:
+        photo_sources=[images]
+    else:
+        photo_sources=[]
+    if row.get("image_url") is not None:
+        photo_sources.append(row["image_url"])
     id_,url=locator
     result={
         "id":"marktplaats:"+id_,"source":"marktplaats","listing_id":id_,"url":url,
@@ -73,7 +85,7 @@ def candidate(row,archive=False):
         "comparable_count":sample if credible else 0,
         "confirmed_profit_eur":None,"needs_inspection":True,
         "issues":[s[:300] for s in issues if isinstance(s,str) and s.strip()][:12],
-        "photo_urls":photo_urls(row.get("image_urls") or [row.get("image_url")])[:5],
+        "photo_urls":photo_urls(photo_sources)[:5],
         "checked_at":checked,"availability":"historical_unverified" if archive else "not_confirmed",
     }
     # A seller may change the Marktplaats URL slug without changing the car.
