@@ -103,6 +103,18 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         self.assertNotIn("Private Person",json.dumps(p))
         self.assertNotIn("0612345678",json.dumps(p))
         self.assertEqual(len(p[0]["content_hash"]),64)
+    def test_minor_bumper_damage_remains_research_not_verified_profit(self):
+        car={**self.good,"title":"Opel Corsa 2009 APK bumper schade",
+             "mileage_km":180000,"seller_type":"particulier"}
+        normalized=fb.normalize(car,"Apify",self.now)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized["title"],car["title"])
+        self.assertIsNone(normalized["confirmed_profit_eur"])
+        self.assertTrue(normalized["needs_inspection"])
+        self.assertIsNone(fb.normalize(
+            {**car,"title":"Opel Corsa 2009 achterbumper met kras",
+             "mileage_km":180000},"Apify",self.now))
+
     def test_exclude_parts_from_actual_stored_provider_results(self):
         from facebook_vehicle_filter import is_vehicle_title
         with patch.object(fb, "ROOT", Path(__file__).resolve().parent):
