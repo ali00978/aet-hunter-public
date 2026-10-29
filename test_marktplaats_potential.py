@@ -13,6 +13,35 @@ class PotentialCandidateTests(unittest.TestCase):
                    'description':'Goed onderhouden, auto rijdt normaal. '*9}
     def car(self,i,**kw):
         return {**self.base,'url':URL.replace('m123',f'm{i}'),**kw}
+    def test_aggregate_rejection_reasons_are_consistent_without_extra_requests(self):
+        old=self.car(77001,checked_at=(self.now-timedelta(days=5)).isoformat())
+        dealer=self.car(77002,seller_type='handelaar')
+        risk=self.car(77003,title='Opel Corsa motor kapot')
+        pricey=self.car(77004,price=4500)
+        delivered=self.car(77005)
+        duplicate={**delivered,'title':'Opel Corsa andere slug',
+                   'url':delivered['url'].replace('corsa','nieuw')}
+        unknown=self.car(77006,seller_type='onbekend',price=750)
+        badbid=self.car(77007,seller_type='onbekend',price_type='MIN_BID',
+                        price=None,minimum_bid_eur=400)
+        diagnostics={}
+        rows=select_potential_candidates(
+            [old,dealer,risk,pricey,delivered,duplicate,unknown,badbid],
+            [],now=self.now,limit=300,excluded_listing_ids={'m77005'},
+            diagnostics=diagnostics)
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['seller_type'],'onbekend')
+        self.assertEqual(diagnostics['source_records'],8)
+        self.assertEqual(diagnostics['eligible'],3)
+        self.assertEqual(diagnostics['stale'],1)
+        self.assertEqual(diagnostics['technical_risk'],1)
+        self.assertEqual(diagnostics['dealer'],1)
+        self.assertEqual(diagnostics['price_ineligible'],1)
+        self.assertEqual(diagnostics['unverified_seller_bid'],1)
+        self.assertEqual(diagnostics['previously_delivered'],2)
+        self.assertEqual(diagnostics['unique_after_filter'],1)
+        self.assertEqual(diagnostics['selected_unknown_seller'],1)
+
     def test_bounded_300_local_candidate_pool_without_affecting_default(self):
         rows=[self.car(15000+i,price=900) for i in range(320)]
         normal=select_potential_candidates(rows,[],now=self.now)

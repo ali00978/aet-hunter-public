@@ -58,51 +58,55 @@ def _profit_evidence(row, comparison, price):
             'costs_eur': round(derived_costs), 'resale_eur': round(conservative_resale),
             'max_buy_eur': buy_limit}
 
-def _candidate(row, now, max_price):
+def _candidate(row, now, max_price, diagnostics=None):
     from scanner import approved_listing_brand, over_purchase_mileage_limit, is_financing_offer
-    if not isinstance(row, dict):
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics[reason] = diagnostics.get(reason, 0) + 1
         return None
+    if not isinstance(row, dict):
+        return reject('invalid_or_excluded')
     url = row.get('url')
     if not approved_listing_brand(url or '') or row.get('reserved') or row.get('unavailable') or row.get('severe_technical_risk') or over_purchase_mileage_limit(row) or is_financing_offer(row) or row.get('buyer_queue') in ('uitsluiten', 'buiten_budget', 'reparatieproject'):
-        return None
+        return reject('invalid_or_excluded')
     search = row.get('source') == 'marktplaats_search_card'
     try:
         stamp = datetime.fromisoformat(str(row.get('discovered_at') if search else row.get('checked_at')).replace('Z','+00:00'))
     except (ValueError, TypeError, OverflowError):
-        return None
+        return reject('stale')
     if stamp.tzinfo is None or not timedelta(0) <= now - stamp <= timedelta(hours=24 if search else 48):
-        return None
+        return reject('stale')
     text = (str(row.get('title') or '') + '\n' + str(row.get('description') or '')).lower()
     if any(term in text for term in HIGH_RISK) or technical_risk_signals(row):
-        return None
+        return reject('technical_risk')
     if vehicle_facts(row).get('vehicle_data_warnings'):
-        return None
+        return reject('vehicle_warnings')
     seller = seller_evidence(row)['seller_type']
     if seller == 'handelaar':
-        return None
+        return reject('dealer')
     kind, price = row.get('price_type'), row.get('price')
     # A missing private-seller signal does NOT prove a business seller.
     # Keep a bounded fallback of complete, fixed-price vehicle detail pages
     # for manual research, never bid-only pages with unknown seller identity.
     # Dealer names/descriptions are still rejected by seller_evidence().
     if not search and seller == 'onbekend' and kind != 'FIXED':
-        return None
+        return reject('unverified_seller_bid')
     if search:
         if not _amount(price) or not 350 <= price <= max_price:
-            return None
+            return reject('price_ineligible')
         category, price_label = 'zoekkaart', f'€{price:,.0f} (onbevestigd)'
     elif kind == 'FIXED':
         if not _amount(price) or not 350 <= price <= max_price:
-            return None
+            return reject('price_ineligible')
         category, price_label = 'vaste_prijs', f'€{price:,.0f}'
     elif kind in ('MIN_BID', 'FAST_BID', 'ON_REQUEST', 'SEE_DESCRIPTION'):
         floor = row.get('minimum_bid_eur')
         if floor is not None and (not _amount(floor) or floor > max_price):
-            return None
+            return reject('price_ineligible')
         category = 'prijs_opvragen'
         price_label = f'Bieden vanaf €{floor:,.0f}' if floor else 'Vraagprijs onbekend'
     else:
-        return None
+        return reject('price_ineligible')
     notes = []
     if not search and seller == 'onbekend':
         notes.append('Verkoperstype niet vastgesteld: controleer of het een particulier betreft voordat je contact opneemt')
@@ -185,6 +189,8 @@ def _candidate(row, now, max_price):
             0 if kind == 'FIXED' and price <= 2000 else 1,
             0 if discount >= .15 else 1,
             -max(0,min(100,score)), -stamp.timestamp())
+    if diagnostics is not None:
+        diagnostics['eligible'] = diagnostics.get('eligible', 0) + 1
     return {**row, 'seller_type':seller, 'potential_category':category,
             'potential_category_label':CATEGORIES[category],
             'potential_display_price':price_label, 'potential_notes':notes,
@@ -197,7 +203,8 @@ def _candidate(row, now, max_price):
             'potential_asking_price_eur':price if kind=='FIXED' and not search else None}
 
 def select_potential_candidates(research, search_cards, max_price=3000, limit=30,
-                                now=None, excluded_listing_ids=None):
+                                now=None, excluded_listing_ids=None,
+                                diagnostics=None):
     """Rank fresh research before the 300-card cap hides unsent vehicles.
 
     Only the outbound delivery feed uses excluded IDs; the normal stored
@@ -205,19 +212,30 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     No extra public searches and no historic offer is mislabelled as new.
     """
     now = now or datetime.now(timezone.utc)
+    if diagnostics is not None:
+        if not isinstance(diagnostics, dict):
+            raise ValueError('Invalid potential research diagnostics')
+        diagnostics.clear()
     if not _amount(max_price) or max_price < 350 or isinstance(limit,bool) or not isinstance(limit,int) or limit <= 0:
         return []
     limit = min(limit,300)
     excluded_listing_ids = set(excluded_listing_ids or ())
+    raw_rows = list(research or []) + list(search_cards or [])
+    if diagnostics is not None:
+        diagnostics['source_records'] = len(raw_rows)
     unique = {}
-    for raw in list(research or []) + list(search_cards or []):
-        candidate = _candidate(raw,now,max_price)
+    for raw in raw_rows:
+        candidate = _candidate(raw,now,max_price,diagnostics)
         if candidate is None:
             continue
         key = listing_id(candidate['url'])
         if key in excluded_listing_ids:
+            if diagnostics is not None:
+                diagnostics['previously_delivered'] = diagnostics.get('previously_delivered',0)+1
             continue
         old = unique.get(key)
+        if old is not None and diagnostics is not None:
+            diagnostics['duplicate'] = diagnostics.get('duplicate', 0) + 1
         # A full detail beats a search hint for the same advert ID.
         if old is None or (old['potential_category']=='zoekkaart' and candidate['potential_category']!='zoekkaart') or (
                 (old['potential_category']=='zoekkaart') == (candidate['potential_category']=='zoekkaart')
@@ -255,4 +273,12 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     # Quotas retain a mix, but the final display should not bury the strongest
     # actual margin scenarios behind 18 ordinary fixed-price research cards.
     selected.sort(key=lambda row: row['potential_sort'])
+    if diagnostics is not None:
+        diagnostics['unique_after_filter'] = len(unique)
+        diagnostics['selected'] = len(selected)
+        diagnostics['selected_unknown_seller'] = sum(
+            row['seller_type'] == 'onbekend' and row['potential_category'] != 'zoekkaart'
+            for row in selected)
+        diagnostics['selected_search_cards'] = sum(
+            row['potential_category'] == 'zoekkaart' for row in selected)
     return [{**row,'potential_rank':i+1} for i,row in enumerate(selected[:limit])]

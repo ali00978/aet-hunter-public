@@ -39,9 +39,11 @@ def build(now=None, max_price=3000, limit=30, excluded_listing_ids=None):
         sources[name] = {'exists': (ROOT / name).exists(),
                          'count': len(data) if isinstance(data, list) else 0,
                          'valid': isinstance(data, list)}
+    diagnostics = {}
     current = select_potential_candidates(research, search, max_price=max_price,
                                           limit=limit, now=now,
-                                          excluded_listing_ids=excluded_listing_ids)
+                                          excluded_listing_ids=excluded_listing_ids,
+                                          diagnostics=diagnostics)
     archived = False
     checked = _time(state.get('checked_at'))
     if not current:
@@ -54,7 +56,8 @@ def build(now=None, max_price=3000, limit=30, excluded_listing_ids=None):
             current = select_potential_candidates(
                 research, search, max_price=max_price, limit=limit,
                 now=latest + timedelta(minutes=1),
-                excluded_listing_ids=excluded_listing_ids)
+                excluded_listing_ids=excluded_listing_ids,
+                diagnostics=diagnostics)
             archived = bool(current)
     # No values are recomputed: the scanner's margins and strict shortlist
     # remain separate; the UI must not treat this broad list as purchase advice.
@@ -73,6 +76,7 @@ def build(now=None, max_price=3000, limit=30, excluded_listing_ids=None):
             'scan_checked_at':state.get('checked_at'),
             'scan_health':state.get('scan_health','onbekend'),
             'source_info':sources,'archived':archived,
+            'research_diagnostics': diagnostics,
             'count':len(current),
             'cars':[{k:r[k] for k in allowed if k in r} for r in current]}
 
