@@ -633,6 +633,53 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 self.assertEqual(attempts[0]["scan"]["id"],failed_tail_scan_id,
                                  "Retry of the unsent tail must use its original id")
 
+    def test_facebook_delivery_prioritizes_unsent_before_thirty_without_http(self):
+        import hunter_sync
+        import hunter_feed
+        import hunter_pro_combined
+        import facebook_hunter
+        import public_apify_collector
+        now=datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            env={"AET_MODAL_LIVE_ENABLED":"I_ACCEPT_LIVE_SCANS",
+                 "AET_FACEBOOK_ENABLED":"true",
+                 "AET_PRO_SYNC_URL":
+                  "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                 "AET_HUNTER_SYNC_TOKEN":"x"*26,
+                 "AET_HUNTER_STATE_DIR":d}
+            received=[]
+            rows=[]
+            for i in range(65):
+                rows.append({
+                    "url":f"https://www.facebook.com/marketplace/item/{980000+i}/",
+                    "title":"Toyota Aygo 2012","price":750 if i<30 else 1500,
+                    "mileage_km":110000 if i<30 else 250000,
+                    "seller_type":"particulier",
+                    "listedAt":now.isoformat(),"checked_at":now.isoformat()})
+            def collect(_root, _env, persist):
+                (root/"apify_status.json").write_text(
+                    json.dumps({"status":"ok","checked_at":now.isoformat()}))
+                (root/"apify_kandidaten.json").write_text(json.dumps(rows))
+                persist()
+                return {"status":"ok","checked_at":now.isoformat()}
+            def send(packet,*_args):
+                received.append(packet)
+                return {"received":True}
+            with patch.object(public_apify_collector,"collect",side_effect=collect):
+                with patch.object(hunter_sync,"send",side_effect=send):
+                    for _ in range(3):
+                        self.assertEqual(runtime.run_platform("facebook",env=env),"synced")
+            counts=[len(item["scan"]["candidate_ids"]) for item in received]
+            self.assertEqual(counts,[30,30,5])
+            first=set(received[0]["scan"]["candidate_ids"])
+            second=set(received[1]["scan"]["candidate_ids"])
+            third=set(received[2]["scan"]["candidate_ids"])
+            self.assertFalse(first & second)
+            self.assertFalse(first & third)
+            self.assertFalse(second & third)
+            self.assertEqual(len(first | second | third),65)
+
     def test_facebook_provider_snapshot_to_aet_pro_batch_without_network(self):
         import hunter_sync
         import hunter_feed
