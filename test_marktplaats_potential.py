@@ -91,6 +91,40 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(categories[rows[0]['url']],'vaste_prijs')
         self.assertEqual(categories[rows[1]['url']],'klein_herstel')
         self.assertEqual(categories[rows[2]['url']],'klein_herstel')
+    def test_seller_review_is_not_mislabeled_as_car_repair(self):
+        unknown=self.car(31601,seller_type='onbekend',price=995)
+        private=self.car(31602,seller_type='particulier',price=1200)
+        repair=self.car(31603,seller_type='onbekend',price=850,
+                        description='Airco werkt niet, verder rijdt auto goed. '*12)
+        candidates=select_potential_candidates(
+            [unknown,private,repair],[],now=self.now)
+        found={row['url']:row for row in candidates}
+        self.assertEqual(found[unknown['url']]['potential_category'],'vaste_prijs')
+        self.assertTrue(found[unknown['url']]['potential_seller_review_required'])
+        self.assertFalse(found[private['url']]['potential_seller_review_required'])
+        self.assertEqual(found[repair['url']]['potential_category'],'klein_herstel')
+        self.assertTrue(found[repair['url']]['potential_seller_review_required'])
+        self.assertTrue(any('Airco werkt mogelijk niet' in note
+                            for note in found[repair['url']]['potential_notes']))
+
+    def test_photo_fallback_preserves_valid_cover_without_extra_requests(self):
+        from hunter_pro_export import candidate
+        first=('https://images.marktplaats.com/'
+               'api/v1/hz-mp-pro-listing/images/first.jpg')
+        cover=('https://images.marktplaats.com/'
+               'api/v1/hz-mp-pro-listing/images/cover.jpg')
+        unknown=self.car(31605,seller_type='onbekend',price=800)
+        base=select_potential_candidates([unknown],[],now=self.now)[0]
+        result=candidate({**base,'image_urls':['https://evil.example/photo.jpg',
+                                                   'https://images.marktplaats.com/nope'],
+                          'image_url':cover})
+        self.assertEqual(result['photo_urls'],[cover])
+        result=candidate({**base,'image_urls':[first,cover,first],
+                          'image_url':cover})
+        self.assertEqual(result['photo_urls'],[first,cover])
+        self.assertEqual(result['category'],'vaste_prijs')
+        self.assertIsNone(result['confirmed_profit_eur'])
+
     def test_unknown_seller_fixed_price_is_manual_research_not_a_deal(self):
         comparison={'status':'indicatieve_vraagprijzen','sample_size':6,
                     'median_asking_price_eur':4200,'high_price_dispersion':False}
