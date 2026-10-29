@@ -159,8 +159,10 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         # the lexicographically larger clock hour.
         moment=datetime(2026,10,29,15,0,tzinfo=timezone.utc)
         older={**self.good,"price":650,
+               "listedAt":moment.isoformat(),"first_seen_at":moment.isoformat(),
                "checked_at":"2026-10-29T16:00:00+02:00"}
         fresher={**self.good,"price":1950,
+                 "listedAt":moment.isoformat(),"first_seen_at":moment.isoformat(),
                  "checked_at":"2026-10-29T14:30:00+00:00"}
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
