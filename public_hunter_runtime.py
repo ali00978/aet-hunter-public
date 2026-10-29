@@ -122,6 +122,34 @@ def safe_scan_counters(status):
 
 
 
+
+def safe_marktplaats_research_counts(feed):
+    """Only bounded aggregate funnel counters may enter public Actions logs."""
+    if not isinstance(feed, dict):
+        return None
+    values = feed.get("research_diagnostics")
+    if not isinstance(values, dict):
+        return None
+    fields = ("source_records", "eligible", "invalid_or_excluded",
+              "stale", "technical_risk", "vehicle_warnings", "dealer",
+              "unverified_seller_bid", "price_ineligible",
+              "previously_delivered", "duplicate", "unique_after_filter",
+              "selected", "selected_unknown_seller", "selected_search_cards")
+    if any(type(values.get(k,0)) is not int or not 0 <= values.get(k,0) <= 20000
+           for k in fields):
+        return None
+    numbers = {k:values.get(k,0) for k in fields}
+    rejected = sum(numbers[k] for k in fields[2:9])
+    if (numbers["source_records"] != numbers["eligible"]+rejected or
+            numbers["eligible"] != numbers["previously_delivered"]+
+            numbers["duplicate"]+numbers["unique_after_filter"] or
+            numbers["selected"] > numbers["unique_after_filter"] or
+            numbers["selected_unknown_seller"]+numbers["selected_search_cards"] >
+            numbers["selected"]):
+        return None
+    return numbers
+
+
 def safe_marktplaats_discovery_counts(status):
     """Public Actions logs contain bounded COUNTS, never private listings."""
     if not isinstance(status, dict):
@@ -356,6 +384,21 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                     key[len("marktplaats:"):] for key in previously_sent
                     if key.startswith("marktplaats:")
                 })
+            stats = safe_marktplaats_research_counts(broader_mp_feed)
+            if stats is not None:
+                print("marktplaats: onderzoeksfilter bronregels=" +
+                      str(stats["source_records"]) +
+                      ", afgekeurd_verlopen=" + str(stats["stale"]) +
+                      ", technisch_risico=" + str(stats["technical_risk"]) +
+                      ", handelaren=" + str(stats["dealer"]) +
+                      ", ongeldige_prijs=" + str(stats["price_ineligible"]) +
+                      ", eerder_doorgestuurd=" +
+                      str(stats["previously_delivered"]) +
+                      ", na_filter=" + str(stats["selected"]) +
+                      ", verkoper_onbekend=" +
+                      str(stats["selected_unknown_seller"]) +
+                      ", zoekkaarten=" +
+                      str(stats["selected_search_cards"]),flush=True)
             if broader_mp_feed.get("archived"):
                 # An empty healthy scan can fall back to previously saved
                 # research. Retain that private archive for inspection, but
