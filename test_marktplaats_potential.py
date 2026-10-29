@@ -62,6 +62,43 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(categories[rows[0]['url']],'vaste_prijs')
         self.assertEqual(categories[rows[1]['url']],'klein_herstel')
         self.assertEqual(categories[rows[2]['url']],'klein_herstel')
+    def test_unknown_seller_fixed_price_is_manual_research_not_a_deal(self):
+        comparison={'status':'indicatieve_vraagprijzen','sample_size':6,
+                    'median_asking_price_eur':4200,'high_price_dispersion':False}
+        unknown=self.car(31001,seller_type='onbekend',price=800,
+                         market_comparison=comparison,
+                         estimated_costs_allowance_eur=300)
+        private=self.car(31002,seller_type='particulier',price=1400,
+                         market_comparison=comparison,
+                         estimated_costs_allowance_eur=300)
+        rows=select_potential_candidates([unknown,private],[],now=self.now)
+        self.assertEqual(len(rows),2)
+        self.assertEqual(rows[0]['url'],private['url'])
+        self.assertEqual(rows[1]['seller_type'],'onbekend')
+        self.assertEqual(rows[1]['potential_trade_tier'],'nadere_controle')
+        self.assertTrue(any('Verkoperstype niet vastgesteld' in note
+                            for note in rows[1]['potential_notes']))
+        from hunter_pro_export import candidate
+        exported=candidate(rows[1])
+        self.assertEqual(exported['seller_classification'],'onbekend')
+        self.assertTrue(exported['needs_inspection'])
+        self.assertIsNone(exported['confirmed_profit_eur'])
+
+    def test_unknown_seller_bids_and_disguised_dealers_remain_excluded(self):
+        unknown_bid=self.car(31101,seller_type='onbekend',price_type='MIN_BID',
+                             minimum_bid_eur=500,price=None)
+        disguised=self.car(31102,seller_type='onbekend',
+                           seller_name='Garagebedrijf Jansen',
+                           price_type='FIXED',price=800)
+        high_risk=self.car(31103,seller_type='onbekend',
+                           title='Opel Corsa motor kapot')
+        over_budget=self.car(31104,seller_type='onbekend',price=4000)
+        verified=self.car(31105,seller_type='onbekend',price=950)
+        result=select_potential_candidates(
+            [unknown_bid,disguised,high_risk,over_budget,verified],[],
+            now=self.now)
+        self.assertEqual([row['url'] for row in result],[verified['url']])
+
     def test_hard_risks_and_above_limit_are_not_recommended(self):
         rows=[self.car(601,title='Opel Corsa motor kapot'),
               self.car(602,title='Opel Corsa financial lease'),
