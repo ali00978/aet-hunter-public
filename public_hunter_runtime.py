@@ -415,7 +415,10 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             path=root / "hunter_pro_combined.json", now=now,
             mp_feed=broader_mp_feed,
             known_mp_fingerprints=previous_mp_signatures,
-            mp_limit=50 if platform == "marktplaats" else mp_limit)
+            mp_limit=50 if platform == "marktplaats" else mp_limit,
+            # Preserve Facebook's update semantics, but avoid starving new
+            # cars when more than thirty eligible saved provider records exist.
+            known_fb_ids=checkpoint["facebook"])
         persist()
         # Full research archive is not the same as newly discovered ads.
         # Compare against ONLY confirmed prior deliveries; failed syncs must
