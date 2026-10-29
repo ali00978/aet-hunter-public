@@ -256,7 +256,7 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
         if not isinstance(known_delivery_ids,(dict,set,frozenset)):
             raise ValueError("Invalid acknowledged Facebook delivery history")
         known_delivery_ids=set(known_delivery_ids)
-    status=[];result={}
+    status=[];result={};unavailable={}
     for source,status_name,provider in SOURCES:
         details=data(status_name)
         records=data(source)
@@ -266,6 +266,30 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
                        "saved":len(records) if isinstance(records,list) else 0})
         if not isinstance(records,list):continue
         for raw in records:
+            # A newer saved provider observation of SOLD/PENDING must
+            # suppress an older available copy of the same Facebook ID.
+            # Never trust a missing timestamp or arbitrary external URL.
+            if isinstance(raw,dict) and (
+                    raw.get("isSold") is True or raw.get("isPending") is True):
+                url=raw.get("url")
+                if isinstance(url,str):
+                    try:
+                        parts=urlsplit(url)
+                        match=(ID_RE.fullmatch(parts.path)
+                               if parts.scheme=="https" and
+                               parts.hostname in ("www.facebook.com","facebook.com","m.facebook.com")
+                               and not parts.username and not parts.password
+                               and parts.port in (None,443) else None)
+                    except ValueError:
+                        match=None
+                    observed=when(raw.get("checked_at")) or checked
+                    if match and observed and (
+                            timedelta(0) <= now-observed <= MAX_AGE):
+                        key="facebook:"+match.group(1)
+                        moment=observed.astimezone(timezone.utc)
+                        if key not in unavailable or moment>unavailable[key]:
+                            unavailable[key]=moment
+                continue
             item=normalize(raw,provider,now,provider_at=checked)
             if not item:continue
             prior=result.get(item["id"])
@@ -281,6 +305,12 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
                   prior["year"] is not None,bool(prior["photo_urls"]))
                  if prior else None)
             if prior is None or rank>old:result[item["id"]]=item
+    # Do this after reading ALL sources, so source order cannot resurrect a
+    # sold car. Only a strictly newer available observation may override it.
+    for key, moment in unavailable.items():
+        previous=result.get(key)
+        if previous is not None and when(previous["checked_at"]).astimezone(timezone.utc) <= moment:
+            del result[key]
     if include_manual:
         # Live app-local manual inbox only. It is not shared back to GitHub.
         from facebook_inbox import load_items
