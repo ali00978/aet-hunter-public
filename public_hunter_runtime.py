@@ -141,6 +141,24 @@ def safe_marktplaats_discovery_counts(status):
     return tuple(values)
 
 
+
+def safe_marktplaats_failure_summary(status):
+    """Bounded diagnostic counts only; never log listing data or raw errors."""
+    if not isinstance(status, dict):
+        return None
+    health = status.get("scan_health")
+    if health not in ("blocked", "partial_errors", "idle_no_requests"):
+        return None
+    search_errors = status.get("search_errors")
+    detail_errors = status.get("detail_errors")
+    blocked = status.get("blocked_this_run")
+    if (type(search_errors) is not int or not 0 <= search_errors <= 145
+            or type(detail_errors) is not int or not 0 <= detail_errors <= 145
+            or type(blocked) is not bool):
+        return None
+    return health, search_errors, detail_errors, blocked
+
+
 def checkpoint_history_count(checkpoint, platform):
     """Only return a validated count, never an encrypted-state car identifier."""
     if platform not in ("marktplaats", "facebook") or not isinstance(checkpoint, dict):
@@ -293,6 +311,14 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                       flush=True)
         print(platform + ": healthy=" + str(healthy))
         if not healthy:
+            if platform == "marktplaats":
+                failure = safe_marktplaats_failure_summary(status)
+                if failure is not None:
+                    label, search_errors, detail_errors, blocked = failure
+                    print("marktplaats: scan_health=" + label +
+                          ", zoekfouten=" + str(search_errors) +
+                          ", detailfouten=" + str(detail_errors) +
+                          ", geblokkeerd=" + str(blocked), flush=True)
             return "unhealthy"
         now = datetime.now(timezone.utc)
         # Load only acknowledged deliveries, BEFORE choosing the next 30

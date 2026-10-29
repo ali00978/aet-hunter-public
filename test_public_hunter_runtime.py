@@ -66,6 +66,25 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 {}):
             self.assertIsNone(runtime.safe_marktplaats_discovery_counts(bad))
 
+    def test_unhealthy_scan_logs_only_bounded_diagnostic_counts(self):
+        status = {"scan_health": "partial_errors", "search_errors": 1,
+                  "detail_errors": 0, "blocked_this_run": False,
+                  "seller_name": "PRIVATE NEVER LOG",
+                  "url": "https://example.invalid"}
+        self.assertEqual(runtime.safe_marktplaats_failure_summary(status),
+                         ("partial_errors", 1, 0, False))
+        for bad in ({**status, "scan_health": "PRIVATE NEVER LOG"},
+                    {**status, "search_errors": "1"},
+                    {**status, "detail_errors": 146},
+                    {**status, "blocked_this_run": "false"},
+                    {**status, "search_errors": True},
+                    {}):
+            self.assertIsNone(runtime.safe_marktplaats_failure_summary(bad))
+        self.assertEqual(runtime.safe_marktplaats_failure_summary(
+            {**status, "scan_health": "blocked",
+             "search_errors": 0, "blocked_this_run": True}),
+            ("blocked", 0, 0, True))
+
     def test_delivery_checkpoint_continuity_reports_counts_only(self):
         existing = {"marktplaats": {
             "marktplaats:m123456": "0"*64,
