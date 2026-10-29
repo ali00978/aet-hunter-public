@@ -188,6 +188,41 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
             {**self.good,"url":"https://www.facebook.com:443/marketplace/item/11111111111/"},
             "Apify",self.now))
 
+    def test_newer_sold_or_pending_snapshot_suppresses_older_available_car(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            old=(self.now-timedelta(days=2)).isoformat()
+            available={**self.good,"checked_at":old}
+            sold={**self.good,"checked_at":self.now.isoformat(),"isSold":True}
+            for filename,records in (("apify_kandidaten.json",[available]),
+                                     ("socialfetch_kandidaten.json",[sold])):
+                (root/filename).write_text(json.dumps(records))
+            for filename in ("apify_status.json","socialfetch_status.json"):
+                (root/filename).write_text(json.dumps(
+                    {"status":"ok","checked_at":self.now.isoformat()}))
+            with patch.object(fb,"ROOT",root):
+                result=fb.find_candidates(now=self.now)
+            self.assertEqual(result["count"],0)
+            (root/"socialfetch_kandidaten.json").write_text(json.dumps([
+                {**sold,"isSold":False,"isPending":True}]))
+            with patch.object(fb,"ROOT",root):
+                self.assertEqual(fb.find_candidates(now=self.now)["count"],0)
+
+    def test_old_sold_snapshot_cannot_hide_newer_available_car(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            old=(self.now-timedelta(days=2)).isoformat()
+            newer={**self.good,"checked_at":self.now.isoformat()}
+            sold={**self.good,"checked_at":old,"isSold":True}
+            (root/"apify_kandidaten.json").write_text(json.dumps([newer]))
+            (root/"socialfetch_kandidaten.json").write_text(json.dumps([sold]))
+            for filename in ("apify_status.json","socialfetch_status.json"):
+                (root/filename).write_text(json.dumps(
+                    {"status":"ok","checked_at":self.now.isoformat()}))
+            with patch.object(fb,"ROOT",root):
+                result=fb.find_candidates(now=self.now)
+            self.assertEqual(result["count"],1)
+
     def test_sources_and_duplicates(self):
         with tempfile.TemporaryDirectory() as path:
             root=Path(path)
