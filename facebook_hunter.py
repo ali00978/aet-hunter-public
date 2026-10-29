@@ -130,10 +130,19 @@ def normalize(raw,source,now,provider_at=None):
     if not isinstance(raw,dict):return None
     url=raw.get("url")
     if not isinstance(url,str):return None
-    try:parsed=urlsplit(url)
-    except ValueError:return None
-    if (parsed.scheme!="https" or parsed.hostname not in ("www.facebook.com","facebook.com","m.facebook.com")
-        or parsed.username or parsed.password):return None
+    try:
+        parsed=urlsplit(url)
+        if (parsed.scheme!="https" or
+                parsed.hostname not in ("www.facebook.com","facebook.com","m.facebook.com")
+                or parsed.username or parsed.password
+                or parsed.port not in (None,443)):
+            return None
+    except ValueError:
+        return None
+    # Cached Social Fetch or manual records may report sold/pending cars
+    # even when the Apify collector already rejects those statuses.
+    if raw.get("isSold") is True or raw.get("isPending") is True:
+        return None
     match=ID_RE.fullmatch(parsed.path)
     if not match:return None
     item_id=match.group(1)
@@ -244,9 +253,17 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
             item=normalize(raw,provider,now,provider_at=checked)
             if not item:continue
             prior=result.get(item["id"])
-            # Prefer verified timestamp and actual additional structured fields.
-            rank=(item["mileage_km"] is not None,item["year"] is not None,bool(item["photo_urls"]),item["checked_at"])
-            old=(prior["mileage_km"] is not None,prior["year"] is not None,bool(prior["photo_urls"]),prior["checked_at"]) if prior else None
+            # The newest validated source record must win. An old, richer
+            # snapshot with photos and mileage is not evidence that its asking
+            # price is still current. Compare true UTC instants: ISO strings
+            # with different offsets do NOT sort chronologically.
+            checked=when(item["checked_at"]).astimezone(timezone.utc)
+            rank=(checked,item["mileage_km"] is not None,
+                  item["year"] is not None,bool(item["photo_urls"]))
+            old=((when(prior["checked_at"]).astimezone(timezone.utc),
+                  prior["mileage_km"] is not None,
+                  prior["year"] is not None,bool(prior["photo_urls"]))
+                 if prior else None)
             if prior is None or rank>old:result[item["id"]]=item
     if include_manual:
         # Live app-local manual inbox only. It is not shared back to GitHub.
