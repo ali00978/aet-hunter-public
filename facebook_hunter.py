@@ -49,7 +49,8 @@ LOCAL_HINTS = (
     "emmelord", "nijkerk", "amersfoort",
 )
 def has_word(text, word):
-    return bool(re.search(r"(?<!\\w)" + re.escape(word) + r"(?!\\w)", text))
+    """Match a whole model/brand/place term, never embedded text fragments."""
+    return bool(re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text))
 
 def is_trade_model(title):
     """Never mix unrelated brands into this dealership's 16-brand shortlist."""
@@ -145,8 +146,18 @@ def normalize(raw,source,now,provider_at=None):
     formatted = str(raw.get("priceFormatted") or "").lstrip()
     if currency and currency != "EUR":return None
     if formatted.startswith(("$","£")):return None
-    mileage=parse_mileage(raw.get("mileage_km") or raw.get("mileage"))
-    if mileage is not None and mileage>330000:return None
+    # Provider fields can disagree. Never let a lower kilometre field mask a
+    # higher valid reading or let two materially inconsistent readings be
+    # presented as one confirmed odometer. Do not request any extra data.
+    raw_mileages = [parse_mileage(raw.get(key))
+                    for key in ("mileage_km", "mileage")
+                    if raw.get(key) is not None]
+    mileages = [value for value in raw_mileages if value is not None]
+    if any(value > 330000 for value in mileages):return None
+    if len(mileages) > 1 and (
+            max(mileages)-min(mileages) >
+            max(1000, round(max(mileages)*.01))):return None
+    mileage=mileages[0] if mileages else None
     posted=when(raw.get("listedAt") or raw.get("listed_at"))
     # If date is missing, do not invent one: keep a visible warning.
     if posted and (posted>now+timedelta(hours=3) or now-posted>MAX_AGE):return None
@@ -155,8 +166,18 @@ def normalize(raw,source,now,provider_at=None):
     observed=(when(raw.get("checked_at")) or
               when(raw.get("first_seen_at")) or provider_at)
     if not observed or observed>now+timedelta(hours=3) or now-observed>MAX_AGE:return None
-    seller=raw.get("seller_type")
-    if seller=="handelaar":return None
+    # Normalized and older provider payloads use several dealer aliases.
+    # Business evidence always overrides a conflicting private flag.
+    seller_fields={str(raw.get(field) or "").strip().casefold()
+                   for field in ("seller_type","seller_platform_type","sellerType")}
+    if seller_fields & {
+        "handelaar","zakelijk","business","business_seller","dealer",
+        "dealership","professional","trader","company",
+        "commercial","autobedrijf","garagebedrijf"
+    }:return None
+    seller=("particulier" if seller_fields & {
+        "particulier","private","private_seller","individual","consumer"
+    } else "onbekend")
     location=raw.get("city") or raw.get("location")
     if isinstance(location,dict):location=location.get("displayName") or location.get("city")
     location=str(location or "")[:100]
