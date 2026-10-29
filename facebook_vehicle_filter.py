@@ -65,13 +65,35 @@ def _flat(value):
 def term(text, word):
     return bool(re.search(r"(?<!\w)" + re.escape(_flat(word)) + r"(?!\w)",text))
 
+# Do not mistake a whole car with cosmetic bumper damage for a loose
+# bumper part. A mileage/APK/running-car cue is required IN ADDITION to
+# an explicitly damaged bumper. Year alone is too weak: parts sellers
+# commonly name the model-year of compatible cars.
+BUMPER_TERMS = ("bumper", "voorbumper", "achterbumper")
+COMPLETE_CAR_CUE = re.compile(
+    r"\b(?:apk|kenteken|rijdt|rijdend)\b|"
+    r"(?<!\d)\d{1,3}(?:[.\s]\d{3}){1,2}\s*km\b|"
+    r"(?<!\d)\d{4,6}\s*km\b")
+BUMPER_DAMAGE = re.compile(
+    r"\b(?:voorbumper|achterbumper|bumper)\b.{0,32}"
+    r"\b(?:kras|krassen|krasjes|schade|beschadigd|deuk|deuken)\b|"
+    r"\b(?:kras|krassen|krasjes|schade|beschadigd|deuk|deuken)\b.{0,32}"
+    r"\b(?:voorbumper|achterbumper|bumper)\b")
+
+
+def _minor_bumper_damage_on_whole_car(value):
+    return bool(COMPLETE_CAR_CUE.search(value) and BUMPER_DAMAGE.search(value))
+
+
 def is_vehicle_title(title):
     value=_flat(title)
     if len(value.strip())<5 or len(value)>300:
         return False
     if any(term(value,make) for make in EXCLUDED_MAKES):
         return False
-    if any(term(value,word) for word in PARTS):
+    bumper_damage = _minor_bumper_damage_on_whole_car(value)
+    if any(term(value,word) and not (bumper_damage and word in BUMPER_TERMS)
+           for word in PARTS):
         return False
     if any(re.search(expression,value) for expression in MOTORCYCLES):
         return False
