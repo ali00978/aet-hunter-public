@@ -12,6 +12,41 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         self.good={"url":"https://www.facebook.com/marketplace/item/11111111111/",
           "title":"Toyota Aygo 2012 airco","price":1200,"listedAt":self.now.isoformat(),
           "first_seen_at":self.now.isoformat(),"source":"apify_hydedata","score":77}
+    def test_word_boundaries_prevent_embedded_trade_matches(self):
+        self.assertTrue(fb.has_word("VW Polo 2009","polo"))
+        self.assertFalse(fb.has_word("VW Poloshirt","polo"))
+        self.assertFalse(fb.has_word("alfa Romeo","rome"))
+        self.assertTrue(fb.is_trade_model("Volkswagen Polo 2009"))
+        self.assertFalse(fb.is_trade_model("Honda Civica Audiotape 2013"))
+        self.assertTrue(fb.has_word("Almere Buiten","almere"))
+
+    def test_dealer_aliases_and_conflicting_seller_fields_are_rejected(self):
+        for label in ("handelaar","dealer","DEALER","business","BUSINESS_SELLER",
+                      "dealership","professional","trader","company","zakelijk"):
+            with self.subTest(seller=label):
+                self.assertIsNone(fb.normalize(
+                    {**self.good,"seller_type":label},"Apify",self.now))
+        self.assertIsNone(fb.normalize(
+            {**self.good,"seller_type":"particulier",
+             "seller_platform_type":"dealer"},"Apify",self.now))
+        valid=fb.normalize({**self.good,"seller_type":"private_seller"},
+                           "Apify",self.now)
+        self.assertEqual(valid["seller_classification"],"particulier")
+
+    def test_conflicting_odometer_readings_cannot_be_hidden(self):
+        for fields in ({"mileage_km":80000,"mileage":340000},
+                       {"mileage_km":340000,"mileage":80000},
+                       {"mileage_km":155000,"mileage":215000}):
+            with self.subTest(readings=fields):
+                self.assertIsNone(fb.normalize(
+                    {**self.good,**fields},"Apify",self.now))
+        close=fb.normalize({**self.good,"mileage_km":160000,
+                            "mileage":160500},"Apify",self.now)
+        self.assertEqual(close["mileage_km"],160000)
+        self.assertIsNotNone(fb.normalize(
+            {**self.good,"mileage_km":None,"mileage":190000},
+            "Apify",self.now))
+
     def test_price_mileage_seller_unknown_flagged(self):
         r=fb.normalize(self.good,"Apify",self.now)
         self.assertEqual(r["id"],"facebook:11111111111")
