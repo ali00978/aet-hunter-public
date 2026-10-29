@@ -2,6 +2,27 @@
 import unittest
 from facebook_vehicle_filter import is_vehicle_title,provider_photos
 class FacebookAutomotiveClassificationTests(unittest.TestCase):
+    def test_complete_cars_with_minor_bumper_damage_not_misclassified(self):
+        cars=[
+            "Volkswagen Golf 2008 APK bumper schade",
+            "Opel Corsa 2009 178.000 km voorbumper beschadigd",
+            "Renault Clio 2011 achterbumper krasjes 165000 km",
+            "Toyota Aygo 2010 rijdt goed, schade aan bumper",
+        ]
+        for title in cars:
+            with self.subTest(car=title):
+                self.assertTrue(is_vehicle_title(title))
+        loose_parts=[
+            "Golf 7 achterbumper met kras",
+            "Opel Corsa 2009 voorbumper beschadigd",
+            "Audi A3 bumper schade voor onderdelen",
+            "VW Polo 2011 APK voorbumper schade en velgen",
+            "Kia Picanto 2015 losse achterbumper beschadigd",
+        ]
+        for title in loose_parts:
+            with self.subTest(part=title):
+                self.assertFalse(is_vehicle_title(title))
+
     def test_real_false_positives_are_rejected(self):
         titles=[
           "Audi S-Line 8V Stuurwiel met Airbag en Bediening",
