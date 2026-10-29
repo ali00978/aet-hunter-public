@@ -216,8 +216,21 @@ def normalize(raw,source,now,provider_at=None):
         "issues":remarks,"photo_urls":photos,
         "posted_at":posted.isoformat() if posted else None,
         "checked_at":observed.isoformat(),"availability":"not_confirmed"}
-def find_candidates(now=None,limit=30,include_manual=False):
+def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=None):
+    """Choose saved Facebook ads with never-delivered IDs ahead of old ads.
+
+    Historic, already delivered cars remain eligible for changed-price and
+    inspection updates if there are fewer than 30 genuinely new ads. The
+    default no-history research view retains its original ranking. There is
+    no new Facebook/provider request and no change to source data.
+    """
     now=now or datetime.now(timezone.utc)
+    if type(limit) is not int or not 0 <= limit <= 30:
+        raise ValueError("Facebook Hunter supports at most 30 records per batch")
+    if known_delivery_ids is not None:
+        if not isinstance(known_delivery_ids,(dict,set,frozenset)):
+            raise ValueError("Invalid acknowledged Facebook delivery history")
+        known_delivery_ids=set(known_delivery_ids)
     status=[];result={}
     for source,status_name,provider in SOURCES:
         details=data(status_name)
@@ -243,6 +256,7 @@ def find_candidates(now=None,limit=30,include_manual=False):
             item=normalize(normalized,"Handmatig",now)
             if item and item["id"] not in result:result[item["id"]]=item
     ordered=sorted(result.values(),key=lambda x:(
+        (x["id"] in known_delivery_ids) if known_delivery_ids is not None else False,
         -x["score"],
         x["seller_classification"]!="particulier",
         x["mileage_km"] is None,
