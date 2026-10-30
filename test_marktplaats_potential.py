@@ -210,6 +210,7 @@ class PotentialCandidateTests(unittest.TestCase):
         # Cheaper than comparable asking prices does not necessarily cover
         # transport, repairs and resale haircut. No actual marketplace calls.
         compar={'status':'indicatieve_vraagprijzen','sample_size':6,
+                'confidence':'goed_onderbouwde_vraagprijzen',
                 'median_asking_price_eur':4000,'high_price_dispersion':False}
         strong=self.car(9001,price=1200,market_comparison=compar,
                         estimated_costs_allowance_eur=450)
@@ -224,6 +225,20 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertTrue(any('geen bevestigde verkoopprijs of winst' in x
                             for x in result[0]['potential_notes']))
         self.assertTrue(any('biedgrens' in x for x in result[1]['potential_notes']))
+
+    def test_sparse_or_single_seller_comparables_cannot_claim_strong_margin(self):
+        # Even a very large theoretical price gap is not strong evidence when
+        # the reference sample lacks independent sellers or known variants.
+        for sample in (3, 6):
+            comparison={'status':'indicatieve_vraagprijzen','sample_size':sample,
+                        'confidence':'indicatief','reference_named_seller_count':1,
+                        'median_asking_price_eur':5000,'high_price_dispersion':False}
+            row=self.car(9150+sample,price=700,market_comparison=comparison)
+            candidate=select_potential_candidates([row],[],now=self.now)[0]
+            self.assertEqual(candidate['potential_trade_tier'],'nadere_controle')
+            self.assertEqual(candidate['potential_sort'][0],2)
+            self.assertGreater(candidate['potential_net_margin_eur'],
+                               candidate['potential_target_margin_eur'])
 
     def test_more_profit_required_on_a_2500_euro_purchase(self):
         compar={'status':'indicatieve_vraagprijzen','sample_size':5,
@@ -289,6 +304,7 @@ class PotentialCandidateTests(unittest.TestCase):
         # All ads remain in manual research, but not in a misleading order.
         cmp={'status':'indicatieve_vraagprijzen',
              'sample_size':5,'median_asking_price_eur':3000,
+             'confidence':'goed_onderbouwde_vraagprijzen',
              'high_price_dispersion':False}
         best=self.car(9110,price=700,market_comparison=cmp)
         unchecked=self.car(9111,price=800,market_comparison=cmp,

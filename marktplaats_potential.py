@@ -160,7 +160,11 @@ def _candidate(row, now, max_price, diagnostics=None):
     # A superficial 15% asking-price discount often disappears after
     # resale haircut + transport + repairs. Only calculated scenarios may
     # enter the first tier; repairs and weak evidence remain manual research.
+    # Three similar asking prices may all come from one seller or weak variants.
+    # Keep the estimated margin visible for research, but reserve the strongest
+    # label for the comparison engine's independently corroborated confidence.
     strong = (seller == 'particulier' and evidence is not None and enough_details
+              and comparison.get('confidence') == 'goed_onderbouwde_vraagprijzen'
               and category == 'vaste_prijs'
               and evidence['net_eur'] >= evidence['target_eur'])
     tier = ('sterke_marge_na_controle' if strong else
@@ -184,6 +188,7 @@ def _candidate(row, now, max_price, diagnostics=None):
     # an attractive price alone never promotes an unverified seller as a deal.
     priority = (0 if strong else
                 1 if seller == 'particulier' and evidence is not None
+                     and comparison.get('confidence') == 'goed_onderbouwde_vraagprijzen'
                      and evidence['net_eur'] >= evidence['target_eur'] else
                 2 if seller == 'particulier' and evidence is not None
                      and evidence['net_eur'] > 0 else
