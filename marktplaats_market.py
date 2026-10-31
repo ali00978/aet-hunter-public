@@ -121,9 +121,12 @@ def quality_gate(item, base, details, comparison):
                       asking_price_within_buy_limit=None)
         result['missing_information'] += details['vehicle_data_warnings']
     if signals:
+        # Active mechanical faults have unknown repair costs. Do not retain
+        # optimistic gross/net margins after suppressing the purchase advice.
         result.update(severe_technical_risk=True, actionable_lead=False,
                       priority='technisch_risico', score=min(20, result['score']),
                       max_purchase_price_eur=None, indicative_margin_eur=None,
+                      net_margin_before_tax_eur=None, gross_margin_eur=None,
                       asking_price_within_buy_limit=None, required_negotiation_eur=None,
                       technical_risk_signals=signals)
         result['reasons'].append('Technisch risico uit volledige tekst: ' + ', '.join(signals))

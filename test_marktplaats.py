@@ -261,6 +261,32 @@ class DeepMarktplaatsTests(unittest.TestCase):
         self.assertFalse(technical_risk_signals({'description': 'Koppeling vervangen in 2025, werkt goed.'}))
         self.assertIn('koppeling_defect', technical_risk_signals({'description': 'Koppeling matig'}))
 
+    def test_active_mechanical_fault_clears_every_displayed_margin(self):
+        from marktplaats_market import quality_gate
+        details = {'apk_status': 'gunstig', 'mileage_km': 150000}
+        comparison = {'status': 'indicatieve_vraagprijzen'}
+        def assessed():
+            return {'score': 85, 'reasons': [], 'missing_information': [],
+                    'actionable_lead': True, 'target_profit_eur': 500,
+                    'indicative_resale_eur': 3000,
+                    'estimated_costs_allowance_eur': 250}
+        safe = {'title': 'Opel Corsa 2011', 'price': 1000,
+                'description': 'Goed onderhouden en schakelt prima'}
+        with patch('car_triage.quality_gate', return_value=assessed()):
+            normal = quality_gate(safe, {}, details, comparison)
+        self.assertEqual(normal['gross_margin_eur'], 2000)
+        self.assertEqual(normal['net_margin_before_tax_eur'], 1750)
+
+        faulty = {**safe, 'description': 'Versnellingsbak maakt tikkend geluid'}
+        with patch('car_triage.quality_gate', return_value=assessed()):
+            risk = quality_gate(faulty, {}, details, comparison)
+        self.assertTrue(risk['severe_technical_risk'])
+        self.assertFalse(risk['actionable_lead'])
+        for field in ('gross_margin_eur', 'net_margin_before_tax_eur',
+                      'indicative_margin_eur', 'max_purchase_price_eur',
+                      'required_negotiation_eur'):
+            self.assertIsNone(risk[field], field)
+
     def test_market_references_are_auditable_and_deduplicated(self):
         from marktplaats_market import market_comparison
         from datetime import datetime, timezone
