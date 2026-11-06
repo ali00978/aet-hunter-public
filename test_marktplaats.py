@@ -450,3 +450,129 @@ class FreshDiscoveryRegressionTests(unittest.TestCase):
                 URL, {**fact, 'price_type': 'MIN_BID'},
                 'Opel Corsa 2011 150.000 km € 1.000'))
             self.assertEqual(compare.call_count, 1)
+
+
+
+class FreshYieldAndPendingQueueTests(unittest.TestCase):
+    """Guard new-to-Hunter lead discovery without any marketplace requests."""
+
+    def test_historical_old_affordable_stock_no_longer_looks_like_new_deals(self):
+        old = {'http_status': 200, 'unique_cards_seen': 80,
+               'affordable_private_cards': 70,
+               'unseen_affordable_private_cards': 0,
+               'details_assessed': 60, 'quality_leads': 50}
+        fresh = {'http_status': 200, 'unique_cards_seen': 20,
+                 'affordable_private_cards': 7,
+                 'unseen_affordable_private_cards': 5,
+                 'details_assessed': 3, 'quality_leads': 0}
+        history = [{'opel corsa': old, 'toyota aygo': fresh}]
+        self.assertEqual(scanner.historical_affordable_query_yield(
+            'opel corsa', history), 0)
+        self.assertGreater(scanner.historical_affordable_query_yield(
+            'toyota aygo', history), 0)
+        self.assertEqual(scanner.historical_exact_query_yield(
+            'opel corsa', history), 0)
+        self.assertGreater(scanner.historical_exact_query_yield(
+            'toyota aygo', history), 0)
+
+    def test_invalid_fresh_yield_counters_do_not_steer_search_planning(self):
+        invalid = [
+            {'http_status': 200, 'unique_cards_seen': True,
+             'affordable_private_cards': 1, 'unseen_affordable_private_cards': 1},
+            {'http_status': 200, 'unique_cards_seen': 4,
+             'affordable_private_cards': 400, 'unseen_affordable_private_cards': 300},
+            {'http_status': 200, 'unique_cards_seen': 20,
+             'affordable_private_cards': -1, 'unseen_affordable_private_cards': 0},
+            {'http_status': 200, 'unique_cards_seen': 20,
+             'affordable_private_cards': 4, 'unseen_affordable_private_cards': 5},
+            {'http_status': 503, 'unique_cards_seen': 20,
+             'affordable_private_cards': 4, 'unseen_affordable_private_cards': 4},
+            {'http_status': 200, 'unique_cards_seen': 20,
+             'affordable_private_cards': 4,
+             'unseen_affordable_private_cards': '10000'},
+        ]
+        for record in invalid:
+            with self.subTest(record=record):
+                history = [{'opel corsa': record}]
+                self.assertIsNone(scanner.historical_affordable_query_yield(
+                    'opel corsa', history))
+                self.assertIsNone(scanner.historical_exact_query_yield(
+                    'opel corsa', history))
+                self.assertFalse(scanner.recently_saturated_search(
+                    'opel corsa', history))
+                self.assertIsNone(scanner.recent_fresh_search_yield(
+                    'opel corsa', history))
+
+    def test_recent_fresh_signals_beat_old_stale_popularity(self):
+        old = {'http_status': 200, 'unique_cards_seen': 70,
+               'affordable_private_cards': 60,
+               'unseen_affordable_private_cards': 0}
+        fresh = {'http_status': 200, 'unique_cards_seen': 20,
+                 'affordable_private_cards': 5,
+                 'unseen_affordable_private_cards': 4}
+        history = [{'opel corsa': fresh}, {'opel corsa': old},
+                   {'opel corsa': old}, {'opel corsa': old},
+                   {'opel corsa': old}]
+        self.assertEqual(scanner.historical_exact_query_yield(
+            'opel corsa', history), 0)
+        self.assertTrue(scanner.recently_saturated_search(
+            'opel corsa', history))
+        self.assertEqual(scanner.recent_fresh_search_yield(
+            'opel corsa', history), 0)
+
+    def test_full_pending_queue_retains_new_cars_before_old_same_priority(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime(2026, 11, 6, 9, 0, tzinfo=timezone.utc)
+        old_at = (now - timedelta(hours=20)).isoformat()
+        old = [f'https://www.marktplaats.nl/v/auto-s/opel/m{900000+i}-corsa'
+               for i in range(1050)]
+        new = [f'https://www.marktplaats.nl/v/auto-s/opel/m{920000+i}-corsa'
+               for i in range(30)]
+        previous = {
+            url: {'discovered_at': old_at, 'first_discovered_at': old_at,
+                  'facts': {'price_type': 'FIXED', 'price': 1200,
+                            'seller_type': 'particulier'}}
+            for url in old}
+        facts = {url: {'price_type': 'FIXED', 'price': 1200,
+                       'seller_type': 'particulier'} for url in old + new}
+        priorities = {url: (0, 1200) for url in old + new}
+        output = scanner.prepare_pending_rows(
+            old + new, previous, facts, priorities, {}, set(),
+            {scanner.listing_id(u) for u in new}, now, limit=1000)
+        kept = {item['url'] for item in output}
+        self.assertEqual(len(kept), 1000)
+        self.assertTrue(set(new).issubset(kept))
+        self.assertEqual(len(kept & set(old)), 970)
+
+    def test_refresh_of_old_slug_does_not_erase_new_car_under_queue_cap(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime(2026, 11, 6, 9, 0, tzinfo=timezone.utc)
+        old_at = (now - timedelta(hours=20)).isoformat()
+        old_url = 'https://www.marktplaats.nl/v/auto-s/opel/m901000-oude-slug'
+        new_slug = 'https://www.marktplaats.nl/v/auto-s/opel/m901000-nieuwe-slug'
+        fresh_url = 'https://www.marktplaats.nl/v/auto-s/opel/m901001-nieuwe-auto'
+        pending = {old_url: {'discovered_at': old_at,
+                             'first_discovered_at': old_at,
+                             'facts': {'price_type': 'FIXED', 'price': 900}}}
+        fact = {'price_type': 'FIXED', 'price': 900}
+        result = scanner.prepare_pending_rows(
+            [old_url, new_slug, fresh_url], pending,
+            {new_slug: fact, fresh_url: fact},
+            {new_slug: (0, 900), fresh_url: (0, 900)},
+            {}, set(), {scanner.listing_id(new_slug),
+                         scanner.listing_id(fresh_url)}, now, limit=1)
+        self.assertEqual([row['url'] for row in result], [fresh_url])
+        self.assertNotIn(old_url, [row['url'] for row in result])
+
+    def test_invalid_future_first_seen_does_not_win_queue_priority(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 6, 9, 0, tzinfo=timezone.utc)
+        future = 'https://www.marktplaats.nl/v/auto-s/opel/m990001-corsa'
+        valid = 'https://www.marktplaats.nl/v/auto-s/opel/m990002-corsa'
+        pending = {future: {'discovered_at': now.isoformat(),
+                            'first_discovered_at': '2999-01-01T00:00:00+00:00'}}
+        result = scanner.prepare_pending_rows(
+            [future, valid], pending, {},
+            {future: (0, 1000), valid: (0, 1000)},
+            {}, set(), {scanner.listing_id(valid)}, now, limit=1)
+        self.assertEqual(result[0]['url'], valid)

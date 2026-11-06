@@ -502,7 +502,22 @@ def prepare_pending_rows(found, pending, facts, priorities, last_checked,
                 'Actuele zoekkaart of bewaarde advertentiefacts; '
                 'geen gegarandeerde vraagprijs, beschikbaarheid of koopkans')
         })
-    result.sort(key=lambda row: (row['priority'], row['discovered_at'], row['url']))
+    # A bounded 1,000-item queue previously preferred the OLDEST timestamp
+    # at equal priority. Full queues could silently discard newly discovered
+    # affordable cars. Keep purchase priority first, then prefer the latest
+    # first discovery (not a refreshed old ad's 'discovered_at'). Never trust
+    # malformed or future dates from persisted state.
+    def first_seen_rank(row):
+        try:
+            first = datetime.fromisoformat(
+                str(row['first_discovered_at']).replace('Z', '+00:00'))
+            if first.tzinfo is None or first > now:
+                return float('inf')
+            return -first.timestamp()
+        except (TypeError, ValueError, OverflowError, OSError):
+            return float('inf')
+
+    result.sort(key=lambda row: (row['priority'], first_seen_rank(row), row['url']))
     return result[:limit]
 
 
@@ -641,95 +656,80 @@ def newly_found_affordable_search_card(url, checked_listing_ids,
             "marktplaats:" + key not in acknowledged_delivery_ids)
 
 
+def _valid_fresh_query_counts(record):
+    """Accept only internally consistent successful search observations.
+
+    Historical cache data is not trusted: bool, negative values, missing
+    counters and impossible 'unseen > affordable > total' cannot influence
+    query rotation, saturation detection or pagination.
+    """
+    if not isinstance(record, dict) or record.get('http_status') != 200:
+        return None
+    seen = record.get('unique_cards_seen')
+    affordable = record.get('affordable_private_cards')
+    unseen = record.get('unseen_affordable_private_cards')
+    if (any(type(value) is not int for value in (seen, affordable, unseen))
+            or not 0 <= unseen <= affordable <= seen):
+        return None
+    return seen, affordable, unseen
+
+
 def historical_affordable_query_yield(base_query, metric_history):
-    """Estimate useful search yield, not raw page or dealer listing volume."""
+    """Prioritize actual new affordable ads, never the volume of old bargains.
+
+    Old cheap cars and historic quality-lead counts must not disguise a
+    saturated model as fresh. Retain bounded rolling evidence for discovery.
+    """
     observations = []
     for snapshot in metric_history[-7:] if isinstance(metric_history, list) else []:
         if not isinstance(snapshot, dict):
             continue
         for query, record in snapshot.items():
-            if (not isinstance(record, dict) or record.get('http_status') != 200
-                    or not (query == base_query or any(
-                        query == base_query + ' ' + suffix for suffix in DISCOVERY_TERMS))):
+            if not (query == base_query or any(
+                    query == base_query + ' ' + suffix for suffix in DISCOVERY_TERMS)):
                 continue
-            try:
-                assessed = max(0, int(record.get('details_assessed') or 0))
-                quality = min(assessed, max(0, int(record.get('quality_leads') or 0)))
-                observed = max(0, int(record.get('unique_cards_seen') or 0))
-                if 'affordable_private_cards' in record:
-                    affordable = min(observed, max(0, int(record['affordable_private_cards'])))
-                    unseen = min(affordable, max(0, int(
-                        record.get('unseen_affordable_private_cards') or 0)))
-                    # Strongly prefer unseen affordable stock; correct for query size.
-                    score = 3 * (2 * unseen + affordable) / (observed + 5)
-                elif assessed:
-                    # Legacy scans have quality observations but no budget-specific
-                    # counts; do not reward raw numbers of expensive links.
-                    score = 0
-                else:
-                    continue
-                if assessed:
-                    score += 2 * (quality + .25) / (assessed + 3)
-                observations.append(score)
-            except (TypeError, ValueError, OverflowError):
-                continue
-    return sum(observations) / len(observations) if observations else None
+            counts = _valid_fresh_query_counts(record)
+            if counts is not None:
+                seen, _, fresh = counts
+                observations.append(4 * fresh / (seen + 5))
+    recent = observations[-4:]
+    return sum(recent) / len(recent) if recent else None
 
 
 def historical_exact_query_yield(query, metric_history):
-    """Score one query by affordable unseen cards, not raw advertising volume."""
+    """Evaluate a query using only genuinely unseen affordable cars."""
     observations = []
     for snapshot in metric_history[-7:] if isinstance(metric_history, list) else []:
-        row = snapshot.get(query) if isinstance(snapshot, dict) else None
-        if not isinstance(row, dict) or row.get('http_status') != 200:
-            continue
-        if 'affordable_private_cards' not in row:
-            continue
-        try:
-            seen = max(0, int(row.get('unique_cards_seen') or 0))
-            affordable = min(seen, max(0, int(row['affordable_private_cards'])))
-            unseen = min(affordable, max(0, int(row.get('unseen_affordable_private_cards') or 0)))
-        except (ValueError, TypeError, OverflowError):
-            continue
-        observations.append((2 * unseen + affordable)/(seen + 5))
-    return sum(observations)/len(observations) if observations else None
+        record = snapshot.get(query) if isinstance(snapshot, dict) else None
+        counts = _valid_fresh_query_counts(record)
+        if counts is not None:
+            seen, _, fresh = counts
+            observations.append(2 * fresh / (seen + 5))
+    recent = observations[-3:]
+    return sum(recent) / len(recent) if recent else None
 
 
 def recently_saturated_search(query, metric_history):
-    """Two recent normal searches with no *new* affordable cars are exhausted.
-
-    This is a cue to rotate search wording, not proof that no deals exist.
-    Ignore HTTP failures and missing historical metrics.
-    """
+    """Two normal, recent searches without new affordable cars signal saturation."""
     observations = []
     for snapshot in metric_history[-6:] if isinstance(metric_history, list) else []:
-        row = snapshot.get(query) if isinstance(snapshot, dict) else None
-        if not isinstance(row, dict) or row.get('http_status') != 200:
-            continue
-        try:
-            checked = int(row.get('unique_cards_seen') or 0)
-            unseen = int(row['unseen_affordable_private_cards'])
-        except (ValueError, TypeError, OverflowError, KeyError):
-            continue
-        if checked >= 5 and unseen >= 0:
-            observations.append(unseen)
-    return len(observations) >= 2 and all(n == 0 for n in observations[-2:])
+        record = snapshot.get(query) if isinstance(snapshot, dict) else None
+        counts = _valid_fresh_query_counts(record)
+        if counts is not None and counts[0] >= 5:
+            observations.append(counts[2])
+    return len(observations) >= 2 and observations[-2:] == [0, 0]
 
 
 def recent_fresh_search_yield(query, metric_history):
-    """Average recent unseen affordable hits, discarding older saturated yields."""
+    """Average recent genuinely new affordable discoveries (not rechecks)."""
     observations = []
     for snapshot in metric_history[-4:] if isinstance(metric_history, list) else []:
-        row = snapshot.get(query) if isinstance(snapshot, dict) else None
-        if isinstance(row, dict) and row.get('http_status') == 200:
-            try:
-                seen = int(row.get('unique_cards_seen') or 0)
-                fresh = int(row['unseen_affordable_private_cards'])
-                if seen > 0 and fresh >= 0:
-                    observations.append(fresh / seen)
-            except (ValueError, TypeError, OverflowError, KeyError):
-                pass
-    return sum(observations[-2:]) / len(observations[-2:]) if observations else None
+        record = snapshot.get(query) if isinstance(snapshot, dict) else None
+        counts = _valid_fresh_query_counts(record)
+        if counts is not None and counts[0] > 0:
+            observations.append(counts[2] / counts[0])
+    recent = observations[-2:]
+    return sum(recent) / len(recent) if recent else None
 
 
 def choose_motivated_query(base, metric_history, rotation):
@@ -2761,7 +2761,7 @@ def main():
     for pool, slots in ((PRIORITY_QUERIES, 2), (OTHER_QUERIES, 2)):
         ranked = [(historical_affordable_query_yield(q, metric_history), q)
                   for q in pool if q not in selected_queries]
-        ranked = [(score, q) for score, q in ranked if score is not None]
+        ranked = [(score, q) for score, q in ranked if score is not None and score > 0]
         ranked.sort(key=lambda item: (-item[0], item[1]))
         selected_queries.extend(q for _, q in ranked[:slots])
         # No historical evidence? Fall back to deterministic rotating coverage.
