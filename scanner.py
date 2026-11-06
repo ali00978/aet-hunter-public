@@ -2427,9 +2427,10 @@ def comparison_research_shortlist(rows, now, limit=100, reserve=20,
         # seller class, age and budget); do not weaken safety checks.
         from marktplaats_potential import _candidate
         acknowledged = set(delivered_ids)
+        budget = min(new_reserve, max(0, limit - len(saved)))
         added = 0
         for row in ordered:
-            if added >= min(new_reserve, limit - len(saved)):
+            if added >= budget:
                 break
             url = row.get('url')
             if (not approved_listing_brand(url)
