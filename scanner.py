@@ -2350,12 +2350,15 @@ def retain_recent_archive_records(records, limit=1200):
     return sorted(chosen, key=sort_key)
 
 
-def comparison_research_shortlist(rows, now, limit=100, reserve=20):
-    """Keep unfinished valuations visible to the next scan planner.
+def comparison_research_shortlist(rows, now, limit=100, reserve=20,
+                                  delivered_ids=None, new_reserve=50):
+    """Preserve unfinished valuations and never-delivered research in the top 100.
 
-    The general top-100 can otherwise be entirely occupied by older, already
-    compared adverts. This reserves up to 20 *research-only* entries without
-    turning missing comparisons or bidding floors into confirmed deals.
+    Existing 20-slot comparison coverage remains intact. When the private
+    acknowledged delivery checkpoint is supplied, reserve up to 50 additional
+    slots for safe, still-fresh, not-yet-delivered candidates. Re-ranking the
+    same saved rows makes NO extra marketplace requests or profit claims.
+    The legacy two-argument callers retain their original behavior.
     """
     rows = [row for row in rows if isinstance(row, dict)]
     def rank(row):
@@ -2416,6 +2419,27 @@ def comparison_research_shortlist(rows, now, limit=100, reserve=20):
         saved.append(row)
         seen.add(listing_id(url))
     reserved_count = len(saved)
+    if delivered_ids is not None and new_reserve > 0:
+        # The general quality sort prefers high-scoring old adverts. Those
+        # already acknowledged by AET Pro should not conceal eligible fresh
+        # research from the separate outbound delivery feed. Reuse EXACTLY
+        # the candidate gate used by that feed (including technical risk,
+        # seller class, age and budget); do not weaken safety checks.
+        from marktplaats_potential import _candidate
+        acknowledged = set(delivered_ids)
+        added = 0
+        for row in ordered:
+            if added >= min(new_reserve, limit - len(saved)):
+                break
+            url = row.get('url')
+            if (not approved_listing_brand(url)
+                    or listing_id(url) in seen
+                    or 'marktplaats:' + listing_id(url) in acknowledged
+                    or _candidate(row, now, MAX_BUY_PRICE) is None):
+                continue
+            saved.append(row)
+            seen.add(listing_id(url))
+            added += 1
     for row in ordered:
         if len(saved) >= limit:
             break
@@ -3501,7 +3525,8 @@ def main():
                               -int(x.get('score') or 0)))
     older = [row for row in older if row.get('buyer_queue') != 'uitsluiten']
     visible, retained_comparison_research = comparison_research_shortlist(
-        results + older, datetime.now(timezone.utc), limit=100, reserve=20)
+        results + older, datetime.now(timezone.utc), limit=100, reserve=20,
+        delivered_ids=delivered_to_pro, new_reserve=50)
     write_json_state(OUTPUT, visible)
     # Separate fresh, actionable review list from the historical 100-ad research archive.
     hotlist = []
