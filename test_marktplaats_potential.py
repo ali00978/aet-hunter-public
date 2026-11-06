@@ -323,3 +323,66 @@ class PotentialCandidateTests(unittest.TestCase):
                             for i,x in enumerate(result)))
 if __name__=='__main__':
     unittest.main()
+
+
+class UnsentResearchCapTests(unittest.TestCase):
+    """Prevent acknowledged older ads from saturating the 100-row feed."""
+
+    def test_delivery_reservation_exposes_fresh_eligible_cars_without_extra_requests(self):
+        from scanner import comparison_research_shortlist
+        now = datetime.now(timezone.utc)
+        def car(i, score, **changes):
+            return {
+                'url': f'https://www.marktplaats.nl/v/auto-s/opel/m{i}-corsa',
+                'title': 'Opel Corsa 1.2 2011',
+                'description': 'Goed onderhouden, rijdt normaal. ' * 10,
+                'description_source': 'pagina_tekst',
+                'year': 2011, 'mileage_km': 150000, 'price': 1200,
+                'price_type': 'FIXED', 'seller_type': 'particulier',
+                'buyer_queue': 'verder_onderzoek', 'score': score,
+                'checked_at': now.isoformat(), **changes}
+        old = [car(81000 + i, 95) for i in range(120)]
+        unseen = [car(82000 + i, 1) for i in range(25)]
+        acknowledged = {'marktplaats:m' + str(81000 + i) for i in range(120)}
+        baseline, _ = comparison_research_shortlist(
+            old + unseen, now, limit=100, reserve=0)
+        self.assertEqual(len(baseline), 100)
+        self.assertFalse({r['url'] for r in baseline} & {r['url'] for r in unseen})
+        selected, _ = comparison_research_shortlist(
+            old + unseen, now, limit=100, reserve=0,
+            delivered_ids=acknowledged, new_reserve=50)
+        self.assertEqual(len(selected), 100)
+        self.assertEqual(len({r['url'] for r in selected}), 100)
+        self.assertTrue({r['url'] for r in unseen} <= {r['url'] for r in selected})
+
+    def test_reservation_only_promotes_candidates_that_pass_real_export_checks(self):
+        from scanner import comparison_research_shortlist
+        now = datetime.now(timezone.utc)
+        template = {
+            'title': 'Opel Corsa 1.2 2011',
+            'description': 'Goed onderhouden, rijdt normaal. ' * 10,
+            'description_source': 'pagina_tekst',
+            'year': 2011, 'mileage_km': 150000, 'price': 1200,
+            'price_type': 'FIXED', 'seller_type': 'particulier',
+            'buyer_queue': 'verder_onderzoek', 'score': 1,
+            'checked_at': now.isoformat(),
+        }
+        def car(i, **changes):
+            return {**template,
+                    'url': f'https://www.marktplaats.nl/v/auto-s/opel/m{i}-corsa',
+                    **changes}
+        old = [car(83000 + i, score=95) for i in range(120)]
+        valid = [car(84000 + i) for i in range(5)]
+        invalid = [car(85000, seller_type='handelaar'),
+                   car(85001, title='Opel Corsa motor kapot'),
+                   car(85002, price=5000),
+                   car(85003, checked_at=(now - timedelta(days=4)).isoformat()),
+                   car(85004, mileage_km=350000)]
+        acknowledged = {'marktplaats:m' + str(83000 + i) for i in range(120)}
+        selected, _ = comparison_research_shortlist(
+            old + valid + invalid, now, limit=100, reserve=0,
+            delivered_ids=acknowledged, new_reserve=50)
+        ids = {r['url'].split('/')[-1].split('-')[0] for r in selected}
+        self.assertEqual(len(selected), 100)
+        self.assertTrue({'m'+str(84000+i) for i in range(5)} <= ids)
+        self.assertFalse({'m'+str(85000+i) for i in range(5)} & ids)
