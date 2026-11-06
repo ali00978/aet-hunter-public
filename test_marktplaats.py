@@ -356,3 +356,97 @@ class VariantRegressionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+
+class FreshDiscoveryRegressionTests(unittest.TestCase):
+    """Offline: prefer genuinely new purchase prospects over repeated old ads."""
+
+    def test_second_page_old_affordable_stock_never_outscores_new_leads(self):
+        urls = ['toyota aygo', 'opel corsa', 'renault clio',
+                'peugeot 107', 'volkswagen polo', 'ford fiesta']
+        history = [{
+            urls[0]: {'http_status': 200, 'unique_cards_seen': 50,
+                      'affordable_private_cards': 50,
+                      'unseen_affordable_private_cards': 0},
+            urls[1]: {'http_status': 200, 'unique_cards_seen': 20,
+                      'affordable_private_cards': 5,
+                      'unseen_affordable_private_cards': 4},
+        }]
+        chosen = scanner.select_second_page_queries(urls, history, page_limit=2)
+        self.assertIn(1, chosen)
+        self.assertEqual(len(chosen), 2)
+
+    def test_real_page_two_yield_matters_more_than_stale_page_one(self):
+        queries = ['opel corsa', 'renault clio', 'peugeot 107',
+                   'fiat panda', 'seat ibiza', 'toyota aygo']
+        history = [{
+            queries[0]: {'http_status': 200, 'unique_cards_seen': 70,
+                         'affordable_private_cards': 65,
+                         'unseen_affordable_private_cards': 0,
+                         'second_page_unique_listing_cards': 25,
+                         'second_page_unseen_affordable_cards': 0},
+            queries[1]: {'http_status': 200, 'unique_cards_seen': 20,
+                         'affordable_private_cards': 6,
+                         'unseen_affordable_private_cards': 2,
+                         'second_page_unique_listing_cards': 12,
+                         'second_page_unseen_affordable_cards': 4},
+        }]
+        self.assertIn(1, scanner.select_second_page_queries(
+            queries, history, page_limit=2))
+
+    def test_bad_query_metrics_cannot_win_page_two_slots(self):
+        queries = ['opel corsa', 'renault clio', 'peugeot 107',
+                   'fiat panda', 'seat ibiza', 'toyota aygo']
+        history = [{
+            queries[0]: {'http_status': 200, 'unique_cards_seen': 4,
+                         'affordable_private_cards': 4000,
+                         'unseen_affordable_private_cards': 100,
+                         'second_page_unique_listing_cards': True,
+                         'second_page_unseen_affordable_cards': 99},
+            queries[1]: {'http_status': 200, 'unique_cards_seen': 10,
+                         'affordable_private_cards': 5,
+                         'unseen_affordable_private_cards': 2},
+        }]
+        result = scanner.select_second_page_queries(
+            queries, history, page_limit=2)
+        self.assertEqual(len(result), 2)
+        self.assertIn(1, result)
+
+    def test_all_saturated_keyword_variants_rotate_instead_of_stale_base(self):
+        base = 'opel corsa'
+        def saturated():
+            return {'http_status': 200, 'unique_cards_seen': 20,
+                    'affordable_private_cards': 20,
+                    'unseen_affordable_private_cards': 0}
+        history = [
+            {q: saturated() for q in [base] + [
+                base + ' ' + term for term in scanner.DISCOVERY_TERMS]}
+            for _ in range(2)]
+        first = scanner.choose_motivated_query(base, history, rotation=1)
+        second = scanner.choose_motivated_query(base, history, rotation=2)
+        self.assertNotEqual(first, base)
+        self.assertNotEqual(second, base)
+        self.assertNotEqual(first, second)
+        self.assertEqual(
+            scanner.choose_motivated_query(base, history, rotation=4), base)
+
+    def test_missing_structured_fixed_price_can_rank_by_observed_card_hint(self):
+        from unittest.mock import patch
+        fact = {'price_type': 'FIXED', 'price': None,
+                'title': 'Opel Corsa 1.2 2011', 'seller_type': 'particulier',
+                'year': 2011, 'mileage_km': 150000}
+        comparison = {'status': 'indicatieve_vraagprijzen',
+                      'sample_size': 5, 'high_price_dispersion': False,
+                      'median_asking_price_eur': 2800}
+        with patch.object(scanner, 'market_comparison', return_value=comparison) as compare:
+            rank = scanner.search_card_market_gap_rank(
+                URL, fact, 'Opel Corsa 2011 150.000 km € 1.000')
+            self.assertEqual(rank, -5)
+            self.assertEqual(compare.call_count, 1)
+            self.assertEqual(compare.call_args.args[0]['price'], 1000)
+            # Bid floors must never be interpreted as fixed asking prices.
+            self.assertIsNone(scanner.search_card_market_gap_rank(
+                URL, {**fact, 'price_type': 'MIN_BID'},
+                'Opel Corsa 2011 150.000 km € 1.000'))
+            self.assertEqual(compare.call_count, 1)
