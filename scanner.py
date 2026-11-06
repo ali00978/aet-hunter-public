@@ -583,18 +583,29 @@ def search_card_market_gap_rank(url, fact, card_text=''):
     """Rank detail requests only, never certify a bargain or sale price."""
     if not isinstance(fact, dict) or fact.get('price_type') != 'FIXED':
         return None
+    # A structured FIXED advert may omit priceCents even when the visible
+    # search card clearly shows the asking price. Use that unverified hint
+    # solely to order the NEXT detail request; never claim a confirmed margin.
+    hints = search_card_signals(card_text)
     price = fact.get('price')
-    if (not finite_numeric_state(price) or not 350 <= price <= MAX_BUY_PRICE
+    if price is None:
+        price = hints.get('price')
+    if (isinstance(price, bool) or not finite_numeric_state(price)
+            or not 350 <= price <= MAX_BUY_PRICE
             or fact.get('reserved') or fact.get('seller_type') == 'handelaar'
             or obvious_nonrunning_search_card(fact)
-            or is_financing_offer({**fact, 'description': card_text})):
+            or is_financing_offer({**fact, 'description': card_text, 'price': price})):
         return None
     year, km, warnings = search_card_vehicle_hints(fact)
+    if year is None:
+        year = hints.get('year')
+    if km is None:
+        km = hints.get('mileage_km')
     if year is None or km is None or warnings or km > MAX_PURCHASE_MILEAGE_KM:
         return None
     try:
         comparison = market_comparison({
-            **fact, 'url': url, 'year': year, 'mileage_km': km})
+            **fact, 'price': price, 'url': url, 'year': year, 'mileage_km': km})
         median = comparison.get('median_asking_price_eur')
         if (comparison.get('status') != 'indicatieve_vraagprijzen'
                 or comparison.get('sample_size', 0) < 3
@@ -740,6 +751,24 @@ def choose_motivated_query(base, metric_history, rotation):
             return base+' '+max(active, key=lambda x: (x[0], x[1]))[1]
         if unexplored:
             return base+' '+unexplored[rotation % len(unexplored)]
+        # All keyword variants have been tried. Never fall back to a variant
+        # whose historic cheap OLD cars made it look profitable after its
+        # newest healthy scans found zero new affordable adverts. Rotate
+        # least-recently-used variants, with four-scan broad rechecks above.
+        usable = [term for term in DISCOVERY_TERMS
+                  if not recently_saturated_search(base+' '+term, metric_history)]
+        pool = usable or list(DISCOVERY_TERMS)
+        ages = {}
+        for term in pool:
+            successful_indices = [
+                i for i, snapshot in enumerate(metric_history[-7:])
+                if isinstance(snapshot, dict)
+                and isinstance(snapshot.get(base+' '+term), dict)
+                and snapshot[base+' '+term].get('http_status') == 200]
+            ages[term] = max(successful_indices, default=-1)
+        least_recent = sorted(term for term in pool
+                              if ages[term] == min(ages.values()))
+        return base+' '+least_recent[rotation % len(least_recent)]
     successful = sorted(((score, term) for score, term in variants
                          if score is not None and score > 0),
                         key=lambda item: (-item[0], item[1]))
@@ -815,43 +844,37 @@ def select_second_page_queries(queries, metric_history, page_limit=None):
     if page_limit <= 0:
         return set()
     scores = []
+    history = metric_history[-7:] if isinstance(metric_history, list) else []
     for index, query in enumerate(queries):
-        observations = []
-        for snapshot in metric_history[-7:] if isinstance(metric_history, list) else []:
+        observations, page_two = [], []
+        for snapshot in history:
             if not isinstance(snapshot, dict):
                 continue
             record = snapshot.get(query)
             if not isinstance(record, dict) or record.get('http_status') != 200:
                 continue
-            if 'affordable_private_cards' not in record:
-                continue
-            try:
-                affordable = max(0, int(record['affordable_private_cards']))
-                unseen = max(0, int(record.get('unseen_affordable_private_cards') or 0))
-                considered = max(1, int(record.get('unique_cards_seen') or 0))
-            except (TypeError, ValueError, OverflowError):
-                continue
-            # An unseen affordable card is more useful than an already-checked one.
-            observations.append((2 * unseen + affordable) / considered)
-        if observations:
-            baseline = sum(observations) / len(observations)
-            # Compare actual unique cheap finds on page two, not just the
-            # popularity of the same model on page one.
-            page_two = []
-            for snapshot in metric_history[-7:] if isinstance(metric_history, list) else []:
-                record = snapshot.get(query) if isinstance(snapshot, dict) else None
-                if not isinstance(record, dict) or record.get('http_status') != 200:
-                    continue
-                unique = record.get('second_page_unique_listing_cards')
-                fresh = record.get('second_page_unseen_affordable_cards')
-                if (not isinstance(unique, int) or isinstance(unique, bool)
-                        or not isinstance(fresh, int) or isinstance(fresh, bool)
-                        or unique < 0 or fresh < 0 or fresh > unique):
-                    continue
+            # Invalid/provider-corrupt metrics must not award enormous
+            # scores or crash a real scan. Exclude bool and impossible counts.
+            seen = record.get('unique_cards_seen')
+            affordable = record.get('affordable_private_cards')
+            unseen = record.get('unseen_affordable_private_cards')
+            if (all(type(n) is int for n in (seen, affordable, unseen))
+                    and 0 <= unseen <= affordable <= seen):
+                # Already delivered cheap cars are not new opportunities.
+                observations.append(unseen / (seen + 5))
+            unique = record.get('second_page_unique_listing_cards')
+            fresh = record.get('second_page_unseen_affordable_cards')
+            if (type(unique) is int and type(fresh) is int
+                    and 0 <= fresh <= unique):
                 page_two.append(fresh / (unique + 5))
-            score = (baseline * .20 + 4 * sum(page_two) / len(page_two)
-                     if page_two else baseline)
-            scores.append((score, index))
+        if observations or page_two:
+            # Newest three successful samples matter more than stale 7-run
+            # historical bargains. Actual unique page-two yield dominates.
+            recent = observations[-3:]
+            base = sum(recent) / len(recent) if recent else 0
+            recent_second = page_two[-3:]
+            extra = sum(recent_second) / len(recent_second) if recent_second else 0
+            scores.append((base + 4 * extra, index))
     # Use at most 70% exploitation and leave the rest to rotated exploration.
     exploit = min(len(scores), max(1, int(page_limit * .7)))
     chosen = {i for score, i in sorted(scores, key=lambda x: (-x[0], x[1]))[:exploit]
