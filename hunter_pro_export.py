@@ -34,9 +34,8 @@ def canonical(url):
 # This is NOT a complete driving-time filter.
 DEFINITELY_TOO_FAR = frozenset({
     "groningen", "maastricht", "heerlen", "kerkrade", "sittard",
-    "venlo", "roermond", "leeuwarden", "drachten", "assen",
-    "emmen", "winschoten", "stadskanaal", "ter apel",
-    "middelburg", "vlissingen", "terneuzen", "goes",
+    "emmen", "winschoten", "ter apel",
+    "middelburg", "vlissingen", "terneuzen",
 })
 def clearly_outside_almere_area(location):
     if not isinstance(location, str):
