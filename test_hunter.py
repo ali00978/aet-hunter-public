@@ -9,6 +9,16 @@ from seller_filter import seller_type
 from scanner import search_structured_prices, search_card_signals, search_card_priority, parse, extract_fields, choose_detail_links, select_diverse_detail_links, purchase_review_tier, extract_vehicle_year, interleave_search_results, parse_price_eur, is_financing_offer, buying_opportunity, listing_requires_manual_description_check
 
 class HunterTests(unittest.TestCase):
+    def test_export_rejects_clearly_remote_locations(self):
+        from hunter_pro_export import candidate
+        base = {"url": "https://www.marktplaats.nl/v/auto-s/opel/m1234567890-test",
+                "seller_type": "particulier", "checked_at": "2026-11-10T01:00:00+00:00",
+                "title": "Opel Corsa", "mileage": 100000,
+                "price_type": "FIXED", "price": 1250}
+        for city in ("Groningen", "Maastricht", "Heerlen", "Vlissingen"):
+            self.assertIsNone(candidate({**base, "location": city}))
+        self.assertIsNotNone(candidate({**base, "location": "Almere"}))
+
     def test_export_requires_explicit_price_or_bid(self):
         from hunter_pro_export import candidate
         base = {"url": "https://www.marktplaats.nl/v/auto-s/opel/m1234567890-test",
