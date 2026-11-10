@@ -29,8 +29,23 @@ def canonical(url):
     path=parsed.path.rstrip("/")
     found=ID.fullmatch(path)
     return (found.group(1),"https://www.marktplaats.nl"+path) if found else None
+# Conservative guard until road-network travel times from Almere are verified.
+# These cities are clearly beyond the requested 90-minute driving catchment.
+# This is NOT a complete driving-time filter.
+DEFINITELY_TOO_FAR = frozenset({
+    "groningen", "maastricht", "heerlen", "kerkrade", "sittard",
+    "emmen", "winschoten", "ter apel",
+    "middelburg", "vlissingen", "terneuzen",
+})
+def clearly_outside_almere_area(location):
+    if not isinstance(location, str):
+        return False
+    city = location.strip().casefold().split(",")[0].strip()
+    return city in DEFINITELY_TOO_FAR
+
 def candidate(row,archive=False):
     if not isinstance(row,dict) or row.get("reserved") or row.get("unavailable") or row.get("severe_technical_risk"):return None
+    if clearly_outside_almere_area(row.get("location")):return None
     locator=canonical(row.get("url"))
     if not locator:return None
     km=parse_mileage(row.get("mileage_km",row.get("mileage")))
@@ -39,6 +54,10 @@ def candidate(row,archive=False):
     if seller not in ("particulier","onbekend"):return None
     kind=row.get("price_type")
     search=row.get("source")=="marktplaats_search_card" or row.get("potential_category")=="zoekkaart"
+    # Only confirmed fixed prices or genuine bidding listings may reach AET Pro.
+    # ON_REQUEST, SEE_DESCRIPTION and missing types cannot be labelled Bieden.
+    if kind not in ("FIXED", "MIN_BID", "FAST_BID"):return None
+    if search:return None  # Search-card hints are not verified seller prices.
     price=row.get("price")
     if kind=="FIXED" and not search and (not amount(price) or price>3000):return None
     if search and (not amount(price) or price>3000):return None
@@ -76,9 +95,9 @@ def candidate(row,archive=False):
         "seller_classification":seller,"location_label":str(row.get("location") or "")[:120],
         "category":str(row.get("potential_category") or "onderzoek")[:70],
         "rank":row.get("potential_rank") if isinstance(row.get("potential_rank"),int) else None,
-        "price_type":"search_card_unverified" if search else "advertised_fixed" if fixed is not None else "minimum_bid" if kind=="MIN_BID" else "price_unknown",
+        "price_type":"search_card_unverified" if search else "advertised_fixed" if fixed is not None else "minimum_bid",
         "asking_price_eur":fixed,
-        "minimum_bid_eur":round(float(floor),2) if kind=="MIN_BID" and amount(floor) else None,
+        "minimum_bid_eur":round(float(floor),2) if kind in ("MIN_BID", "FAST_BID") and amount(floor) else None,
         "search_card_hint_eur":round(float(price),2) if search and amount(price) and price<=3000 else None,
         "median_comparable_asking_price_eur":round(float(median),2) if credible else None,
         "indicative_resale_eur":round(float(resale),2) if credible and amount(resale) else None,
