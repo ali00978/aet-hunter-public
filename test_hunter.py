@@ -9,6 +9,25 @@ from seller_filter import seller_type
 from scanner import search_structured_prices, search_card_signals, search_card_priority, parse, extract_fields, choose_detail_links, select_diverse_detail_links, purchase_review_tier, extract_vehicle_year, interleave_search_results, parse_price_eur, is_financing_offer, buying_opportunity, listing_requires_manual_description_check
 
 class HunterTests(unittest.TestCase):
+    def test_export_requires_explicit_price_or_bid(self):
+        from hunter_pro_export import candidate
+        base = {"url": "https://www.marktplaats.nl/v/auto-s/opel/m1234567890-test",
+                "seller_type": "particulier", "checked_at": "2026-11-10T01:00:00+00:00",
+                "title": "Opel Corsa", "mileage": 100000}
+        self.assertIsNone(candidate({**base, "price_type": None, "price": None}))
+        self.assertIsNone(candidate({**base, "price_type": "ON_REQUEST"}))
+        self.assertIsNone(candidate({**base, "price_type": "SEE_DESCRIPTION"}))
+        self.assertIsNone(candidate({**base, "price_type": "FIXED", "price": None}))
+        self.assertIsNone(candidate({**base, "price_type": "FIXED", "price": 1000,
+                                     "source": "marktplaats_search_card"}))
+        fixed = candidate({**base, "price_type": "FIXED", "price": 1250})
+        self.assertEqual(fixed["price_type"], "advertised_fixed")
+        self.assertEqual(fixed["asking_price_eur"], 1250)
+        for kind in ("MIN_BID", "FAST_BID"):
+            bid = candidate({**base, "price_type": kind, "minimum_bid_eur": 500})
+            self.assertEqual(bid["price_type"], "minimum_bid")
+            self.assertEqual(bid["minimum_bid_eur"], 500)
+
     def test_conflicting_odometer_fields_cannot_bypass_purchase_limit(self):
         from scanner import over_purchase_mileage_limit
         self.assertTrue(over_purchase_mileage_limit({
