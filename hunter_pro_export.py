@@ -29,8 +29,24 @@ def canonical(url):
     path=parsed.path.rstrip("/")
     found=ID.fullmatch(path)
     return (found.group(1),"https://www.marktplaats.nl"+path) if found else None
+# Conservative guard until road-network travel times from Almere are verified.
+# These cities are clearly beyond the requested 90-minute driving catchment.
+# This is NOT a complete driving-time filter.
+DEFINITELY_TOO_FAR = frozenset({
+    "groningen", "maastricht", "heerlen", "kerkrade", "sittard",
+    "venlo", "roermond", "leeuwarden", "drachten", "assen",
+    "emmen", "winschoten", "stadskanaal", "ter apel",
+    "middelburg", "vlissingen", "terneuzen", "goes",
+})
+def clearly_outside_almere_area(location):
+    if not isinstance(location, str):
+        return False
+    city = location.strip().casefold().split(",")[0].strip()
+    return city in DEFINITELY_TOO_FAR
+
 def candidate(row,archive=False):
     if not isinstance(row,dict) or row.get("reserved") or row.get("unavailable") or row.get("severe_technical_risk"):return None
+    if clearly_outside_almere_area(row.get("location")):return None
     locator=canonical(row.get("url"))
     if not locator:return None
     km=parse_mileage(row.get("mileage_km",row.get("mileage")))
