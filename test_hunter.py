@@ -9,6 +9,27 @@ from seller_filter import seller_type
 from scanner import search_structured_prices, search_card_signals, search_card_priority, parse, extract_fields, choose_detail_links, select_diverse_detail_links, purchase_review_tier, extract_vehicle_year, interleave_search_results, parse_price_eur, is_financing_offer, buying_opportunity, listing_requires_manual_description_check
 
 class HunterTests(unittest.TestCase):
+    def test_export_prioritizes_prices_and_limits_bidding(self):
+        from hunter_pro_export import build_payload
+        from datetime import datetime, timezone
+        now=datetime.now(timezone.utc).isoformat()
+        def row(i, kind):
+            return {"url":f"https://www.marktplaats.nl/v/auto-s/opel/m{1000000000+i}-test",
+                    "seller_type":"particulier","checked_at":now,"title":"Opel Corsa",
+                    "mileage":100000,"location":"Almere","price_type":kind,
+                    "price":1200 if kind=="FIXED" else None}
+        cars=[row(i,"MIN_BID") for i in range(30)]+[row(i+30,"FIXED") for i in range(20)]
+        feed={"version":1,"cars":cars}
+        result=build_payload(feed,limit=30)
+        self.assertEqual(result["count"],23)
+        self.assertEqual(sum(x["price_type"]=="advertised_fixed" for x in result["candidates"]),20)
+        self.assertEqual(sum(x["price_type"]=="minimum_bid" for x in result["candidates"]),3)
+        self.assertEqual(result["candidates"][0]["price_type"],"advertised_fixed")
+        self.assertEqual(build_payload(feed,limit=10)["count"],10)
+        known={f"marktplaats:m{1000000000+i}":"seen" for i in range(30,35)}
+        newer=build_payload(feed,known_fingerprints=known,limit=30)
+        self.assertEqual(sum(x["price_type"]=="advertised_fixed" for x in newer["candidates"]),15)
+
     def test_export_rejects_clearly_remote_locations(self):
         from hunter_pro_export import candidate
         base = {"url": "https://www.marktplaats.nl/v/auto-s/opel/m1234567890-test",

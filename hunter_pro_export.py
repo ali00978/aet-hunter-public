@@ -121,20 +121,23 @@ def build_payload(feed, known_fingerprints=None, limit=30):
         raise ValueError("Ongeldige privégeschiedenis voor selectie")
     if type(limit) is not int or not 1<=limit<=100:
         raise ValueError("Maximaal 100 onderzoeksadvertenties per bron")
-    entries=[];seen=set()
+    # Prioritize actual asking prices; bids must never crowd out priced cars.
+    # At most 10% of the requested batch may be bid-only (maximum five).
+    # No minimum bid count: send fewer cars instead of filling with bids.
+    fixed_entries=[];bid_entries=[];seen=set()
     for row in feed["cars"][:300]:
         item=candidate(row,bool(feed.get("archived")))
-        if item is not None and item["id"] not in seen:
-            entries.append(item);seen.add(item["id"])
-        if len(entries)>=limit and known_fingerprints is None:break
-    if known_fingerprints is not None:
-        # STRICT NEW-ONLY mode for private outbound Hunter batches. Once an
-        # ID has been accepted, even its price drop is NOT a new advertisement.
-        # The 30-card legacy research export stays unchanged (history=None).
-        # Inspect all 300 saved rows first, otherwise repeated top-ranked cars
-        # hide still-unseen candidates deeper in the existing offline pool.
-        entries = [item for item in entries if item["id"] not in known_fingerprints]
-    entries=entries[:limit]
+        if item is None or item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        if known_fingerprints is not None and item["id"] in known_fingerprints:
+            continue  # Strict new-only delivery; never resend old IDs.
+        if item["price_type"]=="advertised_fixed":
+            fixed_entries.append(item)
+        elif item["price_type"]=="minimum_bid":
+            bid_entries.append(item)
+    max_bids=min(5,limit//10)
+    entries=(fixed_entries[:limit]+bid_entries[:min(max_bids,max(0,limit-len(fixed_entries)))])[:limit]
     revision=hashlib.sha256(json.dumps(sorted((x["id"],x["content_hash"]) for x in entries),separators=(",",":")).encode()).hexdigest()
     return {"schema":FORMAT,"source":"aet-cars-ai-hunter","integration_mode":"offline_export_no_upload",
             "scan_checked_at":date(feed.get("scan_checked_at")),
