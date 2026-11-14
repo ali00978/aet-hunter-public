@@ -104,6 +104,34 @@ class MarktplaatsTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_price_on_request_and_empty_bid_do_not_enter_research_as_zero(self):
+        for kind, floor in (('ON_REQUEST', None), ('SEE_DESCRIPTION', None),
+                            ('MIN_BID', None), ('MIN_BID', 0),
+                            ('FAST_BID', 200)):
+            with self.subTest(kind=kind, floor=floor), tempfile.TemporaryDirectory() as tmp:
+                old_cwd=os.getcwd()
+                try:
+                    os.chdir(tmp)
+                    def fetch(url):
+                        if '/q/' in url:
+                            return ('<article><a href="'+URL+
+                                    '">Opel Corsa € 1250</a></article>',url,200)
+                        return page(vehicle()),url,200
+                    data={'title':'Opel Corsa 2011', 'price_type':kind,
+                          'price':None,'minimum_bid_eur':floor}
+                    with patch.object(scanner,'fetch',side_effect=fetch), \
+                         patch.object(scanner,'extract_fields',return_value=data), \
+                         patch.object(scanner.time,'sleep'), \
+                         contextlib.redirect_stdout(io.StringIO()):
+                        scanner.main()
+                    output=json.loads(Path('marktplaats_proefresultaten.json').read_text())
+                    status=json.loads(Path('marktplaats_status.json').read_text())
+                    self.assertEqual(output,[])
+                    self.assertEqual(status['candidate_count'],0)
+                    self.assertGreaterEqual(status['rejected_count'],1)
+                finally:
+                    os.chdir(old_cwd)
+
     def test_restriction_stops_requests(self):
         with tempfile.TemporaryDirectory() as tmp:
             old_cwd = os.getcwd()
@@ -205,6 +233,17 @@ class PublicSearchPriceRegressions(unittest.TestCase):
                         self.assertFalse(review)
                 finally:
                     os.chdir(previous)
+
+    def test_visible_bid_labels_cannot_become_fixed_search_prices(self):
+        for label in ('Bieden vanaf € 1.250', 'Plaats een bod € 1.250',
+                      'Prijs op aanvraag € 1.250', 'N.O.T.K. € 1.250'):
+            with self.subTest(label=label):
+                self.assertIsNone(scanner.search_card_signals(label)['price'])
+                status, review = self._scan_with_structured_card(None, None, label)
+                self.assertEqual(status['search_cards_budget_eligible'], 0)
+                self.assertEqual(review, [])
+        self.assertEqual(scanner.search_card_signals(
+            'Opel Corsa € 1.250 vaste prijs')['price'], 1250)
 
     def test_partial_fixed_price_record_preserves_unambiguous_card_price(self):
         status, review = self._scan_with_structured_card('FIXED', None, '€ 1.250,-')
