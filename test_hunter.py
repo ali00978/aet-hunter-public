@@ -17,13 +17,14 @@ class HunterTests(unittest.TestCase):
             return {"url":f"https://www.marktplaats.nl/v/auto-s/opel/m{1000000000+i}-test",
                     "seller_type":"particulier","checked_at":now,"title":"Opel Corsa",
                     "mileage":100000,"location":"Almere","price_type":kind,
-                    "price":1200 if kind=="FIXED" else None}
+                    "price":1200 if kind=="FIXED" else None,
+                    "minimum_bid_eur":500 if kind!="FIXED" else None}
         cars=[row(i,"MIN_BID") for i in range(30)]+[row(i+30,"FIXED") for i in range(20)]
         feed={"version":1,"cars":cars}
         result=build_payload(feed,limit=30)
-        self.assertEqual(result["count"],23)
+        self.assertEqual(result["count"],21)
         self.assertEqual(sum(x["price_type"]=="advertised_fixed" for x in result["candidates"]),20)
-        self.assertEqual(sum(x["price_type"]=="minimum_bid" for x in result["candidates"]),3)
+        self.assertEqual(sum(x["price_type"]=="minimum_bid" for x in result["candidates"]),1)
         self.assertEqual(result["candidates"][0]["price_type"],"advertised_fixed")
         self.assertEqual(build_payload(feed,limit=10)["count"],10)
         known={f"marktplaats:m{1000000000+i}":"seen" for i in range(30,35)}
@@ -58,6 +59,9 @@ class HunterTests(unittest.TestCase):
             bid = candidate({**base, "price_type": kind, "minimum_bid_eur": 500})
             self.assertEqual(bid["price_type"], "minimum_bid")
             self.assertEqual(bid["minimum_bid_eur"], 500)
+            self.assertIsNone(candidate({**base, "price_type": kind}))
+            self.assertIsNone(candidate({**base, "price_type": kind,
+                                         "minimum_bid_eur": 120}))
 
     def test_conflicting_odometer_fields_cannot_bypass_purchase_limit(self):
         from scanner import over_purchase_mileage_limit

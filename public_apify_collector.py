@@ -781,7 +781,9 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                        "imageUrls", "photoUrls", "photoUrl", "image", "imageUrl",
                        "image_url", "thumbnailUrl", "thumbnail", "photo",
                        "picture", "primaryImage", "coverPhoto", "mainImage",
-                       "listingImage", "currency", "priceFormatted")
+                       "listingImage", "currency", "priceFormatted",
+                       "priceType", "price_type", "pricingType",
+                       "priceText", "priceLabel")
             for raw in rows:
                 if not isinstance(raw, dict):
                     continue
@@ -792,6 +794,15 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                     continue
                 first_seen = history.get(url)
                 normalized = {key: raw[key] for key in allowed if key in raw}
+                # Retain only short public price labels/types, so the
+                # downstream filter can distinguish "Bieden" from a price.
+                for field in ("priceFormatted", "priceType", "price_type",
+                              "pricingType", "priceText", "priceLabel"):
+                    value = normalized.get(field)
+                    if isinstance(value, str):
+                        normalized[field] = value[:120]
+                    else:
+                        normalized.pop(field, None)
                 vehicle = provider_vehicle_fields(raw)
                 normalized.update({key:value for key,value in vehicle.items()
                                    if key != "vehicle_identity_hint"})

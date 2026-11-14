@@ -62,7 +62,7 @@ def candidate(row,archive=False):
     if kind=="FIXED" and not search and (not amount(price) or price>3000):return None
     if search and (not amount(price) or price>3000):return None
     floor=row.get("minimum_bid_eur")
-    if kind=="MIN_BID" and floor is not None and (not amount(floor) or floor>3000):return None
+    if kind in ("MIN_BID", "FAST_BID") and (not amount(floor) or not 350<=floor<=3000):return None
     fixed=round(float(price),2) if kind=="FIXED" and not search and amount(price) else None
     checked=date(row.get("checked_at") or row.get("discovered_at"))
     if not checked:return None
@@ -122,8 +122,8 @@ def build_payload(feed, known_fingerprints=None, limit=30):
     if type(limit) is not int or not 1<=limit<=100:
         raise ValueError("Maximaal 100 onderzoeksadvertenties per bron")
     # Prioritize actual asking prices; bids must never crowd out priced cars.
-    # At most 10% of the requested batch may be bid-only (maximum five).
-    # No minimum bid count: send fewer cars instead of filling with bids.
+    # At most 2 bid-only cars, always <=5% of the actual exported selection.
+    # Never pad a thin fixed-price batch with bidding ads.
     fixed_entries=[];bid_entries=[];seen=set()
     for row in feed["cars"][:300]:
         item=candidate(row,bool(feed.get("archived")))
@@ -136,7 +136,7 @@ def build_payload(feed, known_fingerprints=None, limit=30):
             fixed_entries.append(item)
         elif item["price_type"]=="minimum_bid":
             bid_entries.append(item)
-    max_bids=min(5,limit//10)
+    max_bids=min(2,limit//25,len(fixed_entries)//19)
     entries=(fixed_entries[:limit]+bid_entries[:min(max_bids,max(0,limit-len(fixed_entries)))])[:limit]
     revision=hashlib.sha256(json.dumps(sorted((x["id"],x["content_hash"]) for x in entries),separators=(",",":")).encode()).hexdigest()
     return {"schema":FORMAT,"source":"aet-cars-ai-hunter","integration_mode":"offline_export_no_upload",

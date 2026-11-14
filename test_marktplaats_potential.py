@@ -174,10 +174,34 @@ class PotentialCandidateTests(unittest.TestCase):
     def test_bidding_price_is_never_mislabeled_as_fixed(self):
         rows=[self.car(701,price_type='FAST_BID',price=None,minimum_bid_eur=500),
               self.car(702,price_type='MIN_BID',price=None,minimum_bid_eur=3300)]
-        got=select_potential_candidates(rows,[],now=self.now)
-        self.assertEqual(len(got),1)
-        self.assertEqual(got[0]['potential_category'],'prijs_opvragen')
-        self.assertIsNone(got[0]['potential_asking_price_eur'])
+        # No real asking prices means no deceptive all-bid research feed.
+        self.assertEqual(select_potential_candidates(rows,[],now=self.now),[])
+        priced=[self.car(20000+i,price=900+i) for i in range(19)]
+        got=select_potential_candidates(priced+rows,[],now=self.now)
+        bids=[r for r in got if r['price_type'] != 'FIXED']
+        self.assertEqual(len(bids),1)
+        self.assertEqual(bids[0]['potential_category'],'prijs_opvragen')
+        self.assertIsNone(bids[0]['potential_asking_price_eur'])
+        self.assertEqual(got[-1],bids[0])
+    def test_bid_cap_counts_repairs_and_unpriced_records_are_not_padding(self):
+        priced=[self.car(30000+i,price=900+i) for i in range(75)]
+        bids=[self.car(31000+i,price_type='MIN_BID',price=None,
+                       minimum_bid_eur=500,
+                       description='Airco werkt niet, verder in orde. '*10)
+              for i in range(80)]
+        no_price=[self.car(32000+i,price_type='ON_REQUEST',price=None)
+                  for i in range(70)]
+        result=select_potential_candidates(
+            bids+no_price+priced,[],now=self.now,limit=50)
+        self.assertEqual(len(result),50)
+        self.assertEqual(sum(r['price_type']=='FIXED' for r in result),48)
+        self.assertEqual(sum(r['price_type']=='MIN_BID' for r in result),2)
+        self.assertTrue(all(r['price_type']=='FIXED' for r in result[:48]))
+        self.assertTrue(all(r['price_type']=='MIN_BID' for r in result[-2:]))
+        few=select_potential_candidates(
+            priced[:10]+bids+no_price,[],now=self.now,limit=50)
+        self.assertEqual(len(few),10)
+        self.assertTrue(all(r['price_type']=='FIXED' for r in few))
     def test_search_cards_unverified_and_duplicate_full_page_has_priority(self):
         hint={'url':URL,'source':'marktplaats_search_card','title':'Opel Corsa 2011',
               'price_type':'FIXED','price':900,'year':2011,'mileage_km':150000,
@@ -198,7 +222,7 @@ class PotentialCandidateTests(unittest.TestCase):
     def test_mix_contains_repair_bid_search_and_fixed_if_available(self):
         normal=[self.car(2000+i,price=1200+i*7) for i in range(35)]
         defects=[self.car(2100+i,description='Airco werkt niet, auto rijdt goed. '*10) for i in range(7)]
-        bids=[self.car(2200+i,price_type='MIN_BID',price=None,minimum_bid_eur=200) for i in range(7)]
+        bids=[self.car(2200+i,price_type='MIN_BID',price=None,minimum_bid_eur=450) for i in range(7)]
         hints=[{'url':URL.replace('m123',f'm{2300+i}'),'source':'marktplaats_search_card',
                 'title':'Opel Corsa 2011','price_type':'FIXED','price':1000,
                 'discovered_at':self.now.isoformat()} for i in range(5)]

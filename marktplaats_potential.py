@@ -10,11 +10,11 @@ from marktplaats_market import extra_repair_reserve, listing_id, technical_risk_
 CATEGORIES = {
     'vaste_prijs': 'Interessante vraagprijs',
     'klein_herstel': 'Herstelpunt / diagnose',
-    'prijs_opvragen': 'Bieden / prijs opvragen',
+    'prijs_opvragen': 'Bieden vanaf bekend minimum',
     'zoekkaart': 'Zoekkaart controleren',
 }
-TARGET_MIX = (('vaste_prijs', 18), ('klein_herstel', 6),
-              ('prijs_opvragen', 4), ('zoekkaart', 2))
+TARGET_MIX = (('vaste_prijs', 23), ('klein_herstel', 5),
+              ('zoekkaart', 1), ('prijs_opvragen', 1))
 MINOR_RE = re.compile(
     r'(?i)\b(?:lakschade|krassen|krasjes|deukjes?|kleine deuk|'
     r'bekleding beschadigd|radio werkt niet|raam werkt niet|'
@@ -99,12 +99,13 @@ def _candidate(row, now, max_price, diagnostics=None):
         if not _amount(price) or not 350 <= price <= max_price:
             return reject('price_ineligible')
         category, price_label = 'vaste_prijs', f'€{price:,.0f}'
-    elif kind in ('MIN_BID', 'FAST_BID', 'ON_REQUEST', 'SEE_DESCRIPTION'):
+    elif kind in ('MIN_BID', 'FAST_BID'):
+        # A bid with no explicit numerical floor is not a usable purchase price.
         floor = row.get('minimum_bid_eur')
-        if floor is not None and (not _amount(floor) or floor > max_price):
+        if not _amount(floor) or not 350 <= floor <= max_price:
             return reject('price_ineligible')
         category = 'prijs_opvragen'
-        price_label = f'Bieden vanaf €{floor:,.0f}' if floor else 'Vraagprijs onbekend'
+        price_label = f'Bieden vanaf €{floor:,.0f}'
     else:
         return reject('price_ineligible')
     # Seller verification and mechanical repairs are independent dimensions:
@@ -256,19 +257,29 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     for row in unique.values():
         buckets[row['potential_category']].append(row)
     for rows in buckets.values():
-        rows.sort(key=lambda r:r['potential_sort'])
+        # Even repair-category bids must follow genuine asking prices.
+        rows.sort(key=lambda r:(not r['potential_fixed_asking_price'], r['potential_sort']))
     selected, used, models = [], set(), Counter()
+    fixed_available = sum(r['potential_fixed_asking_price'] for r in unique.values())
+    # Absolute maximum two bids, and never more than 1 per 19 real fixed ads.
+    # With insufficient fixed-price stock, leave slots empty instead of filling bids.
+    max_bids = min(2, limit // 25, fixed_available // 19)
+    bids_used = 0
     def fill(category, cap, quota=None):
+        nonlocal bids_used
         for row in buckets[category]:
             if len(selected)>=limit or (quota is not None and sum(x['potential_category']==category for x in selected)>=quota):
                 break
             key=listing_id(row['url'])
             model=row['potential_model_key']
-            if key in used or models[model]>=cap:
+            is_bid = row.get('price_type') in ('MIN_BID', 'FAST_BID')
+            if key in used or models[model]>=cap or (is_bid and bids_used>=max_bids):
                 continue
             used.add(key)
             models[model]+=1
             selected.append(row)
+            if is_bid:
+                bids_used += 1
     quotas={category:max(1,round(limit*target/30))
             for category,target in TARGET_MIX}
     # Try model diversity first. Then honour each category's quota even when
@@ -281,9 +292,12 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     for cap in (3,6,limit):
         for category,_ in TARGET_MIX:
             fill(category,cap)
-    # Quotas retain a mix, but the final display should not bury the strongest
-    # actual margin scenarios behind 18 ordinary fixed-price research cards.
-    selected.sort(key=lambda row: row['potential_sort'])
+    # Real confirmed asking-price types first, unverified search cards second,
+    # a tiny explicitly priced bidding minority at the very bottom.
+    selected.sort(key=lambda row: (
+        0 if row['potential_fixed_asking_price'] else
+        1 if row['potential_category'] == 'zoekkaart' else 2,
+        row['potential_sort']))
     if diagnostics is not None:
         diagnostics['unique_after_filter'] = len(unique)
         diagnostics['selected'] = len(selected)

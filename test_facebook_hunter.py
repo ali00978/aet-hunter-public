@@ -47,6 +47,23 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
             {**self.good,"mileage_km":None,"mileage":190000},
             "Apify",self.now))
 
+    def test_explicit_bidding_labels_not_misread_as_price(self):
+        # A provider may return 1200 as the current bid rather than a
+        # purchase asking price. Neither can be sent as a priced vehicle.
+        cases=({"priceType":"MIN_BID"},
+               {"price_type":"BIDDING"},
+               {"pricingType":"OFFER"},
+               {"priceFormatted":"Bieden vanaf € 1.200"},
+               {"priceLabel":"Prijs op aanvraag"},
+               {"priceText":"Make an offer"})
+        for fields in cases:
+            with self.subTest(fields=fields):
+                self.assertIsNone(fb.normalize(
+                    {**self.good, **fields},"Apify",self.now))
+        self.assertIsNotNone(fb.normalize(
+            {**self.good,"priceType":"FIXED","priceFormatted":"€ 1.200"},
+            "Apify",self.now))
+
     def test_price_mileage_seller_unknown_flagged(self):
         r=fb.normalize(self.good,"Apify",self.now)
         self.assertEqual(r["id"],"facebook:11111111111")
