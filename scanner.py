@@ -1376,6 +1376,15 @@ def clearly_over_budget_search_card(text, max_price=12000):
     return amount is not None and amount > max_price
 
 
+def search_card_bid_or_request(text):
+    """Do not mistake an untyped visible bid or POA for a fixed asking price."""
+    value = ' '.join(str(text or '').casefold().split())
+    return bool(re.search(
+        r'\b(?:bieden|biedingen|biedprijs|bod|prijs op aanvraag|'
+        r'prijs op verzoek|vraagprijs onbekend|make an offer)\b|'
+        r'\bn\.?o\.?t\.?k\.?\b', value))
+
+
 def search_card_signals(text):
     """Conservative hints only, never a verified vehicle valuation."""
     text = ' '.join(str(text or '').split())
@@ -1389,9 +1398,11 @@ def search_card_signals(text):
                 or re.match(r'(?:wegenbelasting|mrb)\s*(?:$|[.;,])', after)):
             continue
         parsed_amounts.append(parse_price_eur(match.group(1).rstrip('.,')))
-    # Repeated identical prices are safe; conflicting prices are not.
+    # A visible bid label changes the meaning of the amount. Even a single
+    # numeric bid must not become an unverified fixed-price search hint.
     distinct_prices = {p for p in parsed_amounts if p is not None}
-    price = next(iter(distinct_prices)) if len(distinct_prices) == 1 else None
+    price = (next(iter(distinct_prices)) if len(distinct_prices) == 1
+             and not search_card_bid_or_request(text) else None)
     # Identify payment context for the exact amount, not generic financing copy.
     price_matches = list(re.finditer(r'(?:€\s*|\bEUR\s+)([0-9][0-9.,]*)', text, flags=re.I))
     if price is not None:
@@ -2954,7 +2965,13 @@ def main():
                         'price': signals['price'],
                         'description': card_text,
                     })
-                    fixed_or_unspecified = not fact or fact.get('price_type') in (None, 'FIXED')
+                    # A missing platform priceType plus a visible bid label
+                    # cannot borrow a price from anchor, JSON-LD or data-price.
+                    bid_label = (search_card_bid_or_request(card_text) or
+                                 search_card_bid_or_request(anchor_text))
+                    fixed_or_unspecified = (
+                        (not fact or fact.get('price_type') in (None, 'FIXED'))
+                        and (not bid_label or fact.get('price_type') == 'FIXED'))
                     if fixed_or_unspecified and not financing_hint and signals['price'] is None:
                         # A card may contain other amounts while the anchor
                         # holds a single, clear asking price. Never use this
@@ -3328,8 +3345,9 @@ def main():
                 last_checked[link] = datetime.now(timezone.utc).isoformat()
                 continue
             invalidated_urls.add(link)
-            bid_only = data.get('price_type') in ('MIN_BID', 'FAST_BID', 'ON_REQUEST', 'SEE_DESCRIPTION')
-            price = (data.get('minimum_bid_eur') or 0) if bid_only else data.get('price')
+            kind = data.get('price_type')
+            bid_only = kind in ('MIN_BID', 'FAST_BID')
+            price = data.get('minimum_bid_eur') if bid_only else data.get('price')
             title = str(data.get('title') or '').lower()
             # Record every successfully opened page, including rejected ads.
             # Otherwise expensive listings are fetched again every scan.
@@ -3340,11 +3358,17 @@ def main():
                 rejected += 1
                 rejection_reasons['excluded_terms'] += 1
                 continue
-            if not isinstance(price, (int, float)):
+            # Request-only pages and bid floors without a usable explicit
+            # amount are not 0-euro cars. Never store them in research output.
+            if (kind in ('ON_REQUEST', 'SEE_DESCRIPTION')
+                    or not isinstance(price, (int, float))
+                    or isinstance(price, bool) or not finite_numeric_state(price)):
                 rejected += 1
                 rejection_reasons['missing_price'] += 1
                 continue
-            if (not bid_only and not 350 <= price <= 12000) or (bid_only and price > MAX_BUY_PRICE) or data.get('reserved'):
+            if ((not bid_only and not 350 <= price <= 12000)
+                    or (bid_only and not 350 <= price <= MAX_BUY_PRICE)
+                    or data.get('reserved')):
                 rejected += 1
                 rejection_reasons['outside_price_range'] += 1
                 continue

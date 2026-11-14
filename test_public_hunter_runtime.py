@@ -53,7 +53,8 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 'technical_risk':1,'price_ineligible':2,
                 'previously_delivered':1,'duplicate':1,
                 'unique_after_filter':2,'selected':2,
-                'selected_unknown_seller':1,'selected_search_cards':0}
+                'selected_unknown_seller':1,'selected_search_cards':0,
+                'selected_fixed_prices':2,'selected_bid_prices':0}
         self.assertEqual(
             runtime.safe_marktplaats_research_counts({'research_diagnostics':values}),
             {**dict.fromkeys(('invalid_or_excluded','vehicle_warnings',
@@ -65,6 +66,31 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertIsNone(runtime.safe_marktplaats_research_counts(
                 {'research_diagnostics':modified}))
         self.assertIsNone(runtime.safe_marktplaats_research_counts({}))
+
+    def test_price_funnel_counts_reject_inconsistent_or_excess_bids(self):
+        valid={'source_records':3,'eligible':3,'unique_after_filter':3,
+               'selected':3,'selected_fixed_prices':2,
+               'selected_bid_prices':1,'selected_search_cards':0}
+        self.assertEqual(
+            runtime.safe_marktplaats_research_counts(
+                {'research_diagnostics':valid})['selected_bid_prices'], 1)
+        for change in ({'selected_bid_prices':3},
+                       {'selected_bid_prices':True},
+                       {'selected_fixed_prices':0},
+                       {'selected_search_cards':3}):
+            self.assertIsNone(runtime.safe_marktplaats_research_counts(
+                {'research_diagnostics':{**valid,**change}}))
+
+    def test_allowlisted_provider_preflight_reason_never_prints_untrusted_text(self):
+        self.assertEqual(runtime.provider_preflight_label({
+            'preflight_reason':'apify_remaining_included_credit_low'}),
+            'apify_remaining_included_credit_low')
+        self.assertEqual(runtime.provider_preflight_label({
+            'preflight_reason':'provider_gate_unknown'}),
+            'provider_gate_unknown')
+        self.assertIsNone(runtime.provider_preflight_label({
+            'preflight_reason':'token=private https://bad.example'}))
+        self.assertIsNone(runtime.provider_preflight_label({}))
 
     def test_public_discovery_telemetry_is_bounded_and_only_numeric(self):
         counters={"new_detail_links_planned":44,

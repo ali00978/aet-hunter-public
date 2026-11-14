@@ -134,7 +134,8 @@ def safe_marktplaats_research_counts(feed):
               "stale", "technical_risk", "vehicle_warnings", "dealer",
               "unverified_seller_bid", "price_ineligible",
               "previously_delivered", "duplicate", "unique_after_filter",
-              "selected", "selected_unknown_seller", "selected_search_cards")
+              "selected", "selected_unknown_seller", "selected_search_cards",
+              "selected_fixed_prices", "selected_bid_prices")
     if any(type(values.get(k,0)) is not int or not 0 <= values.get(k,0) <= 20000
            for k in fields):
         return None
@@ -145,7 +146,11 @@ def safe_marktplaats_research_counts(feed):
             numbers["duplicate"]+numbers["unique_after_filter"] or
             numbers["selected"] > numbers["unique_after_filter"] or
             numbers["selected_unknown_seller"]+numbers["selected_search_cards"] >
-            numbers["selected"]):
+            numbers["selected"] or
+            (numbers["selected_fixed_prices"] + numbers["selected_bid_prices"] +
+             numbers["selected_search_cards"] != numbers["selected"]) or
+            numbers["selected_bid_prices"] > 2):
+
         return None
     return numbers
 
@@ -252,6 +257,21 @@ def stable_marktplaats_batch_run_id(run_id, candidates):
     return run_id + suffix
 
 
+def provider_preflight_label(status):
+    """Expose only known diagnostic codes, never provider replies or tokens."""
+    if not isinstance(status,dict):
+        return None
+    allowed = {
+        "pending_state_corrupt", "awaiting_existing_actor",
+        "apify_balance_format_unknown", "apify_account_data_unknown",
+        "apify_included_credit_unknown",
+        "apify_free_monthly_reserve_exhausted",
+        "apify_remaining_included_credit_low", "provider_gate_unknown"
+    }
+    value=status.get("preflight_reason")
+    return value if isinstance(value,str) and value in allowed else None
+
+
 def provider_status_label(status):
     """Safe aggregate information only, never attacker-supplied strings."""
     if not isinstance(status,dict):
@@ -328,6 +348,9 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         if platform == "facebook":
             print("facebook: provider_status=" + provider_status_label(status),
                   flush=True)
+            reason=provider_preflight_label(status)
+            if reason is not None:
+                print("facebook: veilige_preflight_reden=" + reason,flush=True)
             # Only a fixed Python exception type, never provider URLs,
             # response bodies, listing data or token values.
             kind=status.get("error_type")
@@ -398,6 +421,12 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                       ", verkoper_onbekend=" +
                       str(stats["selected_unknown_seller"]) +
                       ", zoekkaarten=" +
+                      str(stats["selected_search_cards"]),flush=True)
+            if stats is not None:
+                print("marktplaats: prijsverdeling vaste=" +
+                      str(stats["selected_fixed_prices"]) +
+                      ", bieden=" + str(stats["selected_bid_prices"]) +
+                      ", onbevestigde_zoekkaarten=" +
                       str(stats["selected_search_cards"]),flush=True)
             if broader_mp_feed.get("archived"):
                 # An empty healthy scan can fall back to previously saved
