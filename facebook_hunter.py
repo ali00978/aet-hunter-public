@@ -167,6 +167,19 @@ def normalize(raw,source,now,provider_at=None):
     title=name.casefold()
     if any(word in title for word in BLOCKED):return None
     if raw.get("severe_technical_risk"):return None
+    # A numeric provider field can be a bid floor, not a car asking price.
+    # Honour explicit listing types and visible "Bieden" labels before
+    # treating any provider amount as a usable (still unverified) hint.
+    kinds = ("priceType", "price_type", "pricingType")
+    kind_text = " ".join(str(raw.get(key) or "").upper() for key in kinds)
+    if re.search(r"\b(?:MIN_BID|FAST_BID|BIDDING|BID|OFFER|ON_REQUEST|SEE_DESCRIPTION|PRICE_ON_REQUEST)\b", kind_text):
+        return None
+    labels = " ".join(str(raw.get(key) or "") for key in
+                      ("priceFormatted", "priceText", "priceLabel"))
+    if re.search(r"(?i)\b(?:bieden|biedingen?|bod|prijs\s+op\s+aanvraag|"
+                 r"vraagprijs\s+onbekend|make\s+(?:an?\s+)?offer|"
+                 r"best\s+offer|contact\s+for\s+price)\b", labels):
+        return None
     price=money(raw.get("price"))
     if price is None:return None
     currency = str(raw.get("currency") or "").upper()
