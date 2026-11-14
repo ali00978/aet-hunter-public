@@ -301,6 +301,10 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     if diagnostics is not None:
         diagnostics['unique_after_filter'] = len(unique)
         diagnostics['selected'] = len(selected)
+        diagnostics['selected_fixed_prices'] = sum(
+            row['potential_fixed_asking_price'] for row in selected)
+        diagnostics['selected_bid_prices'] = sum(
+            row.get('price_type') in ('MIN_BID', 'FAST_BID') for row in selected)
         diagnostics['selected_unknown_seller'] = sum(
             row['seller_type'] == 'onbekend' and row['potential_category'] != 'zoekkaart'
             for row in selected)
