@@ -155,6 +155,34 @@ def safe_marktplaats_research_counts(feed):
     return numbers
 
 
+def safe_marktplaats_price_quality(status):
+    """Show verified-price acquisition health without exposing a single advert.
+
+    This distinguishes search-card price visibility from detail pages that
+    actually returned fixed prices. These cannot be conflated into deals.
+    """
+    if not isinstance(status, dict):
+        return None
+    fields = ("detail_pages_attempted", "detail_errors",
+              "fixed_price_candidates", "fixed_private_candidates",
+              "bidding_or_request_candidates", "search_cards_considered",
+              "search_cards_with_visible_price")
+    values = []
+    for name in fields:
+        value = status.get(name)
+        if type(value) is not int or not 0 <= value <= 20000:
+            return None
+        values.append(value)
+    details, errors, fixed, private, bids, cards, visible = values
+    if (details > 145 or errors > details or fixed > details or
+            private > fixed or bids > details or fixed+bids > details or
+            visible > cards):
+        return None
+    return {"details": details, "errors": errors, "fixed": fixed,
+            "private": private, "bid_or_request": bids,
+            "cards": cards, "visible_price_cards": visible}
+
+
 def safe_marktplaats_discovery_counts(status):
     """Public Actions logs contain bounded COUNTS, never private listings."""
     if not isinstance(status, dict):
@@ -336,6 +364,16 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                 print("marktplaats: pagina's=" + str(totals[0]) +
                       ", advertenties=" + str(totals[1]) +
                       ", verzoeken=" + str(totals[2]), flush=True)
+            quality = safe_marktplaats_price_quality(status)
+            if quality is not None:
+                print("marktplaats: detailprijzen bevestigd_vast=" +
+                      str(quality["fixed"]) +
+                      ", particulier_vast=" + str(quality["private"]) +
+                      ", bied_of_aanvraag=" + str(quality["bid_or_request"]) +
+                      ", detailfouten=" + str(quality["errors"]) +
+                      ", zichtbare_zoekkaartprijzen=" +
+                      str(quality["visible_price_cards"]) + "/" +
+                      str(quality["cards"]), flush=True)
             diagnostics = safe_marktplaats_discovery_counts(status)
             if diagnostics:
                 print("marktplaats: nooit_eerder_geopend=" + str(diagnostics[0]) +
@@ -431,6 +469,11 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
                       ", bieden=" + str(stats["selected_bid_prices"]) +
                       ", onbevestigde_zoekkaarten=" +
                       str(stats["selected_search_cards"]),flush=True)
+            if (stats is not None and
+                    stats["selected_fixed_prices"] < 5 and
+                    stats["selected_search_cards"] > stats["selected_fixed_prices"] * 4):
+                print("marktplaats: waarschuwing=te_weinig_bevestigde_vaste_prijzen",
+                      flush=True)
             if broader_mp_feed.get("archived"):
                 # An empty healthy scan can fall back to previously saved
                 # research. Retain that private archive for inspection, but

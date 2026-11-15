@@ -48,6 +48,31 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertIsNone(runtime.safe_scan_counters(invalid))
 
 
+    def test_safe_price_confirmation_telemetry_is_aggregate_only(self):
+        status = {"detail_pages_attempted":80, "detail_errors":3,
+                  "fixed_price_candidates":5, "fixed_private_candidates":2,
+                  "bidding_or_request_candidates":15,
+                  "search_cards_considered":600,
+                  "search_cards_with_visible_price":240,
+                  "title": "private listing information",
+                  "seller_name": "private"}
+        self.assertEqual(
+            runtime.safe_marktplaats_price_quality(status),
+            {"details":80, "errors":3, "fixed":5, "private":2,
+             "bid_or_request":15, "cards":600,
+             "visible_price_cards":240})
+        for changes in ({"detail_pages_attempted":True},
+                        {"fixed_private_candidates":6},
+                        {"fixed_price_candidates":81},
+                        {"detail_errors":81},
+                        {"bidding_or_request_candidates":77},
+                        {"search_cards_with_visible_price":601},
+                        {"search_cards_considered":"600"},
+                        {"detail_pages_attempted":146}):
+            self.assertIsNone(runtime.safe_marktplaats_price_quality(
+                {**status, **changes}))
+        self.assertIsNone(runtime.safe_marktplaats_price_quality({}))
+
     def test_research_funnel_counters_reject_untrusted_or_inconsistent_data(self):
         values={'source_records':9,'eligible':4,'stale':1,'dealer':1,
                 'technical_risk':1,'price_ineligible':2,

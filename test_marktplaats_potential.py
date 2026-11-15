@@ -213,6 +213,46 @@ class PotentialCandidateTests(unittest.TestCase):
         seen=select_potential_candidates([full],[hint],now=self.now)
         self.assertEqual(len(seen),1)
         self.assertEqual(seen[0]['potential_category'],'vaste_prijs')
+    def test_unverified_search_cards_cannot_overwhelm_verified_prices(self):
+        verified = [self.car(88001, price=900), self.car(88002, price=1100)]
+        hints = [
+            {'url': URL.replace('m123', f'm{89000+i}'),
+             'source': 'marktplaats_search_card',
+             'title': 'Opel Corsa 2011', 'price_type': 'FIXED',
+             'price': 950, 'discovered_at': self.now.isoformat()}
+            for i in range(80)
+        ]
+        diagnostics = {}
+        selected = select_potential_candidates(
+            verified, hints, now=self.now, limit=300,
+            diagnostics=diagnostics)
+        self.assertEqual(diagnostics['selected_fixed_prices'], 2)
+        self.assertEqual(diagnostics['selected_search_cards'], 1)
+        self.assertEqual(len(selected), 3)
+        self.assertTrue(all(r['potential_category'] != 'zoekkaart'
+                            for r in selected[:2]))
+        # A lone search card remains explicitly unverified and reviewable.
+        alone = select_potential_candidates(
+            [], hints, now=self.now, limit=30)
+        self.assertEqual(len(alone), 1)
+        self.assertEqual(alone[0]['potential_category'], 'zoekkaart')
+        self.assertIn('onbevestigd', alone[0]['potential_display_price'])
+
+    def test_more_fixed_prices_still_allow_small_manual_review_sample(self):
+        verified = [self.car(90000+i, price=900+i) for i in range(50)]
+        hints = [
+            {'url': URL.replace('m123', f'm{91000+i}'),
+             'source': 'marktplaats_search_card',
+             'title': 'Opel Corsa 2011', 'price_type': 'FIXED',
+             'price': 950, 'discovered_at': self.now.isoformat()}
+            for i in range(80)
+        ]
+        selected = select_potential_candidates(
+            verified, hints, now=self.now, limit=100)
+        self.assertEqual(len([r for r in selected
+                              if r['potential_category'] == 'zoekkaart']), 6)
+        self.assertEqual(len(selected), 56)
+
     def test_empty_and_stale_do_not_get_filled_with_fake_ads(self):
         self.assertEqual(select_potential_candidates([],[],now=self.now),[])
         too_old=self.car(801,checked_at=(self.now-timedelta(days=3)).isoformat())
