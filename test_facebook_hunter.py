@@ -83,6 +83,26 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
             {**self.good,"priceType":"FIXED","priceFormatted":"€ 1.200"},
             "Apify",self.now))
 
+    def test_facebook_numeric_price_cannot_disagree_with_visible_price(self):
+        for value in ("€ 2.500", "EUR 2500", "€ 1.200 of € 1.900",
+                      "€ 1.200 per maand", "vanaf € 1.200",
+                      "€ 1.200 aanbetaling"):
+            with self.subTest(price_label=value):
+                self.assertIsNone(fb.normalize(
+                    {**self.good, "priceFormatted": value},
+                    "Apify", self.now))
+        for field in ("priceText", "priceLabel"):
+            self.assertIsNone(fb.normalize(
+                {**self.good, field: "€ 9.500"},
+                "Apify", self.now))
+        for value in ("€ 1.200", "€ 1.200,-", "EUR 1200",
+                      "€1.200,00", "€ 1.200 vaste prijs"):
+            with self.subTest(matching_price=value):
+                self.assertIsNotNone(fb.normalize(
+                    {**self.good, "priceFormatted": value},
+                    "Apify", self.now))
+        self.assertIsNotNone(fb.normalize(self.good, "Apify", self.now))
+
     def test_price_mileage_seller_unknown_flagged(self):
         r=fb.normalize(self.good,"Apify",self.now)
         self.assertEqual(r["id"],"facebook:11111111111")
