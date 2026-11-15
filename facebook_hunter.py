@@ -174,6 +174,33 @@ def money(value):
     if amount is None or not 350 <= amount <= 3000:
         return None
     return round(amount, 2)
+def provider_price_labels_consistent(raw, numerical_price):
+    """Never mistake a provider numeric amount for a contradictory asking price.
+
+    Labels are research evidence, not independent verification. We reject
+    explicit mismatches, bid-like 'from' prices, or monthly repayments, while
+    leaving absent/non-numeric labels unchanged.
+    """
+    from scanner import parse_price_eur
+    labels = (raw.get("priceFormatted"), raw.get("priceText"),
+              raw.get("priceLabel"))
+    for label in labels:
+        if not isinstance(label, str):
+            continue
+        label = label[:180]
+        if re.search(r"(?i)\b(?:vanaf|starting\s+at|from\s+€|"
+                     r"lease|huurkoop|aanbetaling|termijnbedrag|"
+                     r"per\s+(?:maand|week)|p/m|p\.m\.|/\s*mnd)\b", label):
+            return False
+        amounts = re.findall(r"(?i)(?:€\s*|\bEUR\s+)(\d[\d.,]*)",
+                             label)
+        parsed = [parse_price_eur(value.rstrip(",.")) for value in amounts]
+        if any(amount is not None and
+               abs(amount - numerical_price) > 0.01 for amount in parsed):
+            return False
+    return True
+
+
 def normalize(raw,source,now,provider_at=None):
     if not isinstance(raw,dict):return None
     url=raw.get("url")
@@ -214,6 +241,7 @@ def normalize(raw,source,now,provider_at=None):
         return None
     price=money(raw.get("price"))
     if price is None:return None
+    if not provider_price_labels_consistent(raw, price):return None
     currency = str(raw.get("currency") or "").upper()
     formatted = str(raw.get("priceFormatted") or "").lstrip()
     if currency and currency != "EUR":return None
