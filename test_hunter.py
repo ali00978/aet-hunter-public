@@ -95,6 +95,36 @@ class HunterTests(unittest.TestCase):
             self.assertIsNone(candidate({**base, "price_type": kind,
                                          "minimum_bid_eur": 120}))
 
+    def test_final_export_never_hides_conflicting_mileage_or_dealer_evidence(self):
+        from hunter_pro_export import candidate
+        now = datetime.now(timezone.utc).isoformat()
+        base = {
+            "url": "https://www.marktplaats.nl/v/auto-s/opel/m970001-corsa",
+            "title": "Opel Corsa 2011", "checked_at": now,
+            "seller_type": "particulier", "location": "Almere",
+            "price_type": "FIXED", "price": 1200, "mileage": 180000,
+            "year": "2011", "year_detected": 2011,
+        }
+        normal = candidate(base)
+        self.assertIsNotNone(normal)
+        self.assertEqual(normal["mileage_km"], 180000)
+        self.assertEqual(normal["year"], 2011)
+        # A present-but-null preferred field must retain the real reading.
+        self.assertEqual(candidate({**base, "mileage_km": None})["mileage_km"], 180000)
+        self.assertEqual(candidate({**base, "mileage_km": 181000})["mileage_km"], 181000)
+        self.assertIsNone(candidate({**base, "mileage_km": 340000}))
+        self.assertIsNone(candidate({**base, "mileage": 340000,
+                                     "mileage_km": 180000}))
+        self.assertIsNone(candidate({**base, "mileage_km": 240000}))
+        self.assertIsNone(candidate({**base, "search_card_mileage_hint_km": 345000}))
+        self.assertIsNone(candidate({**base, "year_detected": 2012}))
+        self.assertIsNone(candidate({**base, "seller_name": "Autobedrijf Example B.V."}))
+        self.assertIsNone(candidate({**base, "seller_platform_type": "trader"}))
+        self.assertIsNone(candidate({**base, "location": "Maastricht (LI)"}))
+        self.assertIsNone(candidate({**base, "location": "Groningen (GR), NL"}))
+        self.assertIsNone(candidate({**base, "price": 199}))
+        self.assertIsNotNone(candidate({**base, "location": "Almere (FL)"}))
+
     def test_conflicting_odometer_fields_cannot_bypass_purchase_limit(self):
         from scanner import over_purchase_mileage_limit
         self.assertTrue(over_purchase_mileage_limit({
