@@ -80,6 +80,23 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
                {**self.good,"url":"https://evil.test/marketplace/item/11111111111/"},
                {**self.good,"listedAt":(self.now-timedelta(days=70)).isoformat()}]
         self.assertTrue(all(fb.normalize(r,"Apify",self.now) is None for r in cases))
+    def test_facebook_year_strings_and_local_city_filter_are_consistent(self):
+        example = {**self.good, "title": "Toyota Aygo", "year": "2014",
+                   "city": "Emmeloord"}
+        correct = fb.normalize(example, "Apify", self.now)
+        self.assertIsNotNone(correct)
+        self.assertEqual(correct["year"], 2014)
+        self.assertTrue(any(fb.has_word("Emmeloord", place)
+                            for place in fb.LOCAL_HINTS))
+        self.assertIsNone(fb.normalize(
+            {**example, "year_detected": "2012"}, "Apify", self.now))
+        for remote in ("Groningen", "Groningen (GR)", "Maastricht (LI)"):
+            with self.subTest(location=remote):
+                self.assertIsNone(fb.normalize(
+                    {**example, "city": remote}, "Apify", self.now))
+        self.assertIsNotNone(fb.normalize(
+            {**example, "city": "Almere"}, "Apify", self.now))
+
     def test_unfamiliar_date_permitted_with_note(self):
         row={**self.good,"listedAt":None}
         result=fb.normalize(row,"Apify",self.now)
