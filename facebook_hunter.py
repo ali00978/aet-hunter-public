@@ -273,9 +273,9 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
     for source,status_name,provider in SOURCES:
         details=data(status_name)
         records=data(source)
-        checked=when(details.get("checked_at")) if isinstance(details,dict) else None
+        provider_checked=when(details.get("checked_at")) if isinstance(details,dict) else None
         status.append({"provider":provider,"scan_status":details.get("status") if isinstance(details,dict) else "missing",
-                       "checked_at":checked.isoformat() if checked else None,
+                       "checked_at":provider_checked.isoformat() if provider_checked else None,
                        "saved":len(records) if isinstance(records,list) else 0})
         if not isinstance(records,list):continue
         for raw in records:
@@ -295,7 +295,7 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
                                and parts.port in (None,443) else None)
                     except ValueError:
                         match=None
-                    observed=when(raw.get("checked_at")) or checked
+                    observed=when(raw.get("checked_at")) or provider_checked
                     if match and observed and (
                             timedelta(0) <= now-observed <= MAX_AGE):
                         key="facebook:"+match.group(1)
@@ -303,15 +303,18 @@ def find_candidates(now=None,limit=30,include_manual=False,known_delivery_ids=No
                         if key not in unavailable or moment>unavailable[key]:
                             unavailable[key]=moment
                 continue
-            item=normalize(raw,provider,now,provider_at=checked)
+            item=normalize(raw,provider,now,provider_at=provider_checked)
             if not item:continue
             prior=result.get(item["id"])
             # The newest validated source record must win. An old, richer
             # snapshot with photos and mileage is not evidence that its asking
             # price is still current. Compare true UTC instants: ISO strings
             # with different offsets do NOT sort chronologically.
-            checked=when(item["checked_at"]).astimezone(timezone.utc)
-            rank=(checked,item["mileage_km"] is not None,
+            # Never overwrite the provider scan timestamp with an individual
+            # listing timestamp. Later rows without their own checked_at and
+            # SOLD/PENDING records must inherit the same provider observation.
+            row_checked=when(item["checked_at"]).astimezone(timezone.utc)
+            rank=(row_checked,item["mileage_km"] is not None,
                   item["year"] is not None,bool(item["photo_urls"]))
             old=((when(prior["checked_at"]).astimezone(timezone.utc),
                   prior["mileage_km"] is not None,
