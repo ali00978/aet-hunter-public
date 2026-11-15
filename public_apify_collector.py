@@ -812,6 +812,20 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 raise ValueError("Invalid Facebook history") from None
             if not isinstance(history, dict):
                 raise ValueError("Invalid Facebook history structure")
+            # Earlier versions tracked raw URLs, so tracking query strings
+            # could make the SAME Facebook listing look newly discovered.
+            # Migrate lookups in-memory by canonical numeric listing ID,
+            # retaining the earliest valid first-seen timestamp across URL
+            # aliases without exposing any IDs in the public job log.
+            seen_by_id = {}
+            for old_url, first in history.items():
+                listing_id = trusted_facebook_listing_id(old_url)
+                first_dt = facebook_hunter.when(first)
+                if (listing_id is not None and first_dt is not None and
+                        first_dt <= now + timedelta(hours=3)):
+                    previous = seen_by_id.get(listing_id)
+                    if previous is None or first_dt < previous[0]:
+                        seen_by_id[listing_id] = (first_dt, first)
             accepted = {}
             unavailable_ids = set()
             allowed = ("id", "url", "title", "price", "city", "location",
@@ -845,7 +859,11 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 # do not save seller names into provider state or public logs.
                 if facebook_hunter.business_seller_evidence(raw):
                     continue
-                first_seen = history.get(url)
+                listing_id = trusted_facebook_listing_id(url)
+                if listing_id is None:
+                    continue
+                previous_seen = seen_by_id.get(listing_id)
+                first_seen = previous_seen[1] if previous_seen else None
                 normalized = {key: raw[key] for key in allowed if key in raw}
                 # Retain only short public price labels/types, so the
                 # downstream filter can distinguish "Bieden" from a price.
@@ -894,7 +912,11 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                     normalized["seller_type"] = car["seller_classification"]
                     accepted[car["id"]] = normalized
                     if not first_seen:
-                        history[url] = now.isoformat()
+                        canonical_url = (
+                            "https://www.facebook.com/marketplace/item/"
+                            + listing_id + "/")
+                        history[canonical_url] = now.isoformat()
+                        seen_by_id[listing_id] = (now, now.isoformat())
             # The same ID can occur in both a live and a sold provider row.
             # Fail closed on the explicit unavailable status regardless of
             # the order of rows returned by the provider.
