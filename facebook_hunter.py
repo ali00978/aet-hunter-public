@@ -195,8 +195,8 @@ def provider_price_labels_consistent(raw, numerical_price):
             return False
         if re.search(r"(?i)\b(?:vanaf|starting\s+at|from\s+€|"
                      r"lease|huurkoop|aanbetaling|termijnbedrag|"
-                     r"per\s+(?:maand|week|month)|p/m|p\.m\.|"
-                     r"/\s*(?:mnd|maand|month|week))\b", label):
+                     r"per\s+(?:maand|week|month)|p/m|p\.m\.)\b|"
+                     r"/\s*(?:mnd|maand|month|week)\b", label):
             return False
         amounts = re.findall(
             r"(?i)(?:€\s*|\bEUR\s+)(\d[\d.,]*)|"
