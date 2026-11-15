@@ -264,22 +264,33 @@ def select_potential_candidates(research, search_cards, max_price=3000, limit=30
     # Absolute maximum two bids, and never more than 1 per 19 real fixed ads.
     # With insufficient fixed-price stock, leave slots empty instead of filling bids.
     max_bids = min(2, limit // 25, fixed_available // 19)
+    # Search cards are *not* verified asking prices. Do not pad a nearly
+    # empty priced shortlist with dozens of old search hints. Keep a small
+    # manual-review sample; the separate search-card archive is untouched.
+    max_search_cards = min(6, max(1, limit // 10),
+                           max(1, fixed_available // 4))
     bids_used = 0
+    search_cards_used = 0
     def fill(category, cap, quota=None):
-        nonlocal bids_used
+        nonlocal bids_used, search_cards_used
         for row in buckets[category]:
             if len(selected)>=limit or (quota is not None and sum(x['potential_category']==category for x in selected)>=quota):
                 break
             key=listing_id(row['url'])
             model=row['potential_model_key']
             is_bid = row.get('price_type') in ('MIN_BID', 'FAST_BID')
-            if key in used or models[model]>=cap or (is_bid and bids_used>=max_bids):
+            if (key in used or models[model]>=cap or
+                    (is_bid and bids_used>=max_bids) or
+                    (category == 'zoekkaart' and
+                     search_cards_used >= max_search_cards)):
                 continue
             used.add(key)
             models[model]+=1
             selected.append(row)
             if is_bid:
                 bids_used += 1
+            if category == 'zoekkaart':
+                search_cards_used += 1
     quotas={category:max(1,round(limit*target/30))
             for category,target in TARGET_MIX}
     # Try model diversity first. Then honour each category's quota even when
