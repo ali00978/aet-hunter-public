@@ -264,7 +264,10 @@ def provider_preflight_label(status):
     allowed = {
         "pending_state_corrupt", "awaiting_existing_actor",
         "apify_balance_format_unknown", "apify_account_data_unknown",
-        "apify_included_credit_unknown",
+        "apify_account_http_401", "apify_account_http_403",
+        "apify_account_http_429", "apify_account_http_5xx",
+        "apify_account_http_other", "apify_account_network_unavailable",
+        "apify_account_invalid_response", "apify_included_credit_unknown",
         "apify_free_monthly_reserve_exhausted",
         "apify_remaining_included_credit_low", "provider_gate_unknown"
     }
