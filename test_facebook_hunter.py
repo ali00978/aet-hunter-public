@@ -150,6 +150,48 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fb.find_candidates(now=self.now,known_delivery_ids=["facebook:123"])
 
+    def test_provider_scan_time_not_replaced_by_previous_listing_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_check = (self.now-timedelta(days=14)).isoformat()
+            first = {**self.good, "checked_at": old_check,
+                     "first_seen_at": old_check}
+            second = {**self.good,
+                      "url": "https://www.facebook.com/marketplace/item/22222222222/"}
+            second.pop("first_seen_at", None)
+            (root/"apify_kandidaten.json").write_text(json.dumps([first, second]))
+            (root/"apify_status.json").write_text(json.dumps({
+                "status":"ok", "checked_at":self.now.isoformat()}))
+            with patch.object(fb, "ROOT", root):
+                result = fb.find_candidates(now=self.now)
+            rows = {row["id"]: row for row in result["candidates"]}
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows["facebook:11111111111"]["checked_at"], old_check)
+            self.assertEqual(rows["facebook:22222222222"]["checked_at"],
+                             self.now.isoformat())
+
+    def test_provider_sold_snapshot_without_own_timestamp_still_wins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recently_checked = (self.now-timedelta(days=1)).isoformat()
+            earlier_check = (self.now-timedelta(days=20)).isoformat()
+            available = {**self.good, "checked_at": recently_checked}
+            different_older_car = {
+                **self.good,
+                "url": "https://www.facebook.com/marketplace/item/33333333333/",
+                "checked_at": earlier_check, "first_seen_at": earlier_check
+            }
+            sold = {"url":self.good["url"], "isSold":True}
+            (root/"apify_kandidaten.json").write_text(
+                json.dumps([available, different_older_car, sold]))
+            (root/"apify_status.json").write_text(json.dumps({
+                "status":"ok", "checked_at":self.now.isoformat()}))
+            with patch.object(fb, "ROOT", root):
+                result = fb.find_candidates(now=self.now)
+            ids = {row["id"] for row in result["candidates"]}
+            self.assertNotIn("facebook:11111111111", ids)
+            self.assertIn("facebook:33333333333", ids)
+
     def test_newer_facebook_source_overrules_old_rich_price_and_photo(self):
         from datetime import timedelta
         with tempfile.TemporaryDirectory() as directory:
