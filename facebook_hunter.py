@@ -188,13 +188,24 @@ def provider_price_labels_consistent(raw, numerical_price):
         if not isinstance(label, str):
             continue
         label = label[:180]
+        # The numeric provider price is interpreted as EUR. An explicit
+        # non-EUR label anywhere in the input must override that assumption,
+        # including in priceText/priceLabel (not only priceFormatted).
+        if re.search(r"(?i)[$£¥₹]|\b(?:USD|GBP|CHF|PLN|TRY|AED)\b", label):
+            return False
         if re.search(r"(?i)\b(?:vanaf|starting\s+at|from\s+€|"
                      r"lease|huurkoop|aanbetaling|termijnbedrag|"
-                     r"per\s+(?:maand|week)|p/m|p\.m\.|/\s*mnd)\b", label):
+                     r"per\s+(?:maand|week|month)|p/m|p\.m\.|"
+                     r"/\s*(?:mnd|maand|month|week))\b", label):
             return False
-        amounts = re.findall(r"(?i)(?:€\s*|\bEUR\s+)(\d[\d.,]*)",
-                             label)
-        parsed = [parse_price_eur(value.rstrip(",.")) for value in amounts]
+        amounts = re.findall(
+            r"(?i)(?:€\s*|\bEUR\s+)(\d[\d.,]*)|"
+            r"(\d[\d.,]*)\s*(?:€|\bEUR\b)", label)
+        parsed = [parse_price_eur(raw.rstrip(",."))
+                  for match in amounts for raw in match if raw]
+        # Some providers send just "1.200" as the formatted value.
+        if not parsed and re.fullmatch(r"\s*\d[\d.,]*\s*", label):
+            parsed = [parse_price_eur(label.strip())]
         if any(amount is not None and
                abs(amount - numerical_price) > 0.01 for amount in parsed):
             return False
