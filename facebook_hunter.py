@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from car_triage import HIGH_RISK, PREFERRED
 from marktplaats_data import parse_mileage
 from facebook_vehicle_filter import is_vehicle_title, provider_photos
+from hunter_pro_export import clearly_outside_almere_area
 
 ROOT=Path(os.environ.get("AET_HUNTER_STATE_DIR", Path(__file__).resolve().parent))
 SOURCES=(("apify_kandidaten.json","apify_status.json","Apify"),
@@ -55,7 +56,7 @@ MINOR_REPAIR_WARNINGS = (
 LOCAL_HINTS = (
     "dronten", "almere", "lelystad", "zeewolde", "kampen",
     "zwolle", "harderwijk", "biddinghuizen", "swifterbant",
-    "emmelord", "nijkerk", "amersfoort",
+    "emmeloord", "nijkerk", "amersfoort",
 )
 def has_word(text, word):
     """Match whole case-insensitive model/brand/place terms, never fragments."""
@@ -221,8 +222,23 @@ def normalize(raw,source,now,provider_at=None):
     location=raw.get("city") or raw.get("location")
     if isinstance(location,dict):location=location.get("displayName") or location.get("city")
     location=str(location or "")[:100]
-    year=raw.get("year_detected") or raw.get("year")
-    if not isinstance(year,int) or isinstance(year,bool) or not 1950<=year<=now.year+1:
+    # A clearly out-of-area listing must not enter the local purchase inbox.
+    # This is intentionally only the conservative known-distant-city list,
+    # not a fabricated exact 90-minute routing estimate.
+    if clearly_outside_almere_area(location):
+        return None
+    def parse_year(value):
+        if isinstance(value,str) and re.fullmatch(r"\d{4}",value.strip()):
+            value=int(value.strip())
+        return value if type(value) is int and 1950<=value<=now.year+1 else None
+    year_detected=parse_year(raw.get("year_detected"))
+    year_listed=parse_year(raw.get("year"))
+    # Conflicting explicit years cannot be treated as confirmed specs.
+    if (year_detected is not None and year_listed is not None
+            and year_detected != year_listed):
+        return None
+    year=year_detected if year_detected is not None else year_listed
+    if year is None:
         found=re.search(r"\b(19[89]\d|20[012]\d)\b",title)
         year=int(found.group(1)) if found else None
     photos=provider_photos(raw)
