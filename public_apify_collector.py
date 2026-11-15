@@ -119,9 +119,23 @@ def verify_free_headroom(token, cap, opener=None):
             if not isinstance(data, dict):
                 raise ValueError("apify_account_data_unknown")
             return data
-        except (HTTPError, URLError, TimeoutError, OSError, UnicodeError,
-                TypeError, KeyError, json.JSONDecodeError) as error:
-            raise ValueError("apify_account_data_unknown") from error
+        except HTTPError as error:
+            # Never echo provider bodies, headers, URLs or credentials. A
+            # bounded status-code category is sufficient to troubleshoot
+            # auth/scope/rate-limit failures without allowing paid requests.
+            code = error.code
+            reason = (
+                "apify_account_http_401" if code == 401 else
+                "apify_account_http_403" if code == 403 else
+                "apify_account_http_429" if code == 429 else
+                "apify_account_http_5xx" if 500 <= code <= 599 else
+                "apify_account_http_other"
+            )
+            raise ValueError(reason) from None
+        except (URLError, TimeoutError, OSError):
+            raise ValueError("apify_account_network_unavailable") from None
+        except (UnicodeError, TypeError, KeyError, json.JSONDecodeError):
+            raise ValueError("apify_account_invalid_response") from None
 
     limits_data = account_get(ACCOUNT_LIMITS)
     limits = limits_data.get("limits")
@@ -723,6 +737,13 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
             reason = str(error)
             allowed_reasons = ("apify_balance_format_unknown",
                                "apify_account_data_unknown",
+                               "apify_account_http_401",
+                               "apify_account_http_403",
+                               "apify_account_http_429",
+                               "apify_account_http_5xx",
+                               "apify_account_http_other",
+                               "apify_account_network_unavailable",
+                               "apify_account_invalid_response",
                                "apify_included_credit_unknown",
                                "apify_free_monthly_reserve_exhausted",
                                "apify_remaining_included_credit_low")
