@@ -76,6 +76,11 @@ DISCOVERY_TERMS = VALUE_TERMS + YEAR_SEARCH_TERMS
 MIN_YEAR = 2010
 MAX_PURCHASE_MILEAGE_KM = 330_000  # Purchase ceiling, not a parser or comparison-reference ceiling.
 OLDER_MAX_PRICE = 1250
+# Detail requests for bids/POA and dealer comparables are research only.
+# Keep the finite request budget focused on affordable fixed-price prospects.
+BID_RESEARCH_DETAIL_CAP = 8
+REFERENCE_DETAIL_CAP = 24
+UNKNOWN_DETAIL_CAP = 12
 EXCLUDE_TERMS = ('gevraagd', 'gezocht', 'inkoop', 'financial lease', 'lease voor', 'per maand', 'p/mnd', 'p.mnd', 'p/m', 'maandbedrag', 'aanbetaling', 'termijnbedrag')
 def configured_max_buy_price(raw):
     """Invalid settings must not crash the scanner or silently raise the budget."""
@@ -2025,8 +2030,9 @@ def detail_research_category(url, facts):
     return 'unknown'
 
 
-def bound_detail_research_mix(selected, facts, limit, bid_limit=24,
-                              reference_limit=35, unknown_limit=14):
+def bound_detail_research_mix(
+        selected, facts, limit, bid_limit=BID_RESEARCH_DETAIL_CAP,
+        reference_limit=REFERENCE_DETAIL_CAP, unknown_limit=UNKNOWN_DETAIL_CAP):
     """Spend scarce detail checks on purchase stock before reference research.
 
     Bid floors remain research-only. Hard limits prevent hundreds of existing
@@ -2079,7 +2085,9 @@ def refill_after_research_caps(selected, groups, facts, history, cooldown, now_t
         return selected, 0
     facts = facts if isinstance(facts, dict) else {}
     target_models = set(target_models or ())
-    caps = {'bid_or_request': 24, 'reference': 35, 'unknown': 14, 'clear_risk': 0}
+    caps = {'bid_or_request': BID_RESEARCH_DETAIL_CAP,
+            'reference': REFERENCE_DETAIL_CAP,
+            'unknown': UNKNOWN_DETAIL_CAP, 'clear_risk': 0}
     counts = {}
     used = {listing_id(url) for url in selected}
     for url in selected:
