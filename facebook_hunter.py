@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 from car_triage import HIGH_RISK, PREFERRED
-from marktplaats_data import parse_mileage
+from marktplaats_data import parse_mileage, seller_evidence
 from facebook_vehicle_filter import is_vehicle_title, provider_photos
 from hunter_pro_export import clearly_outside_almere_area
 
@@ -63,6 +63,37 @@ def has_word(text, word):
     text = str(text or "").casefold()
     word = str(word or "").casefold()
     return bool(word and re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text))
+
+def business_seller_evidence(raw):
+    """Reject conflicting dealer flags and business names before saving data.
+
+    The seller name itself is neither logged nor retained in the normalized
+    candidate; only a safely derived business classification is used.
+    """
+    if not isinstance(raw, dict):
+        return False
+    seller = raw.get("seller")
+    seller = seller if isinstance(seller, dict) else {}
+    business_types = {
+        "handelaar", "zakelijk", "business", "business_seller", "dealer",
+        "dealership", "professional", "trader", "company", "commercial",
+        "autobedrijf", "garagebedrijf",
+    }
+    values = (
+        raw.get("seller_type"), raw.get("seller_platform_type"),
+        raw.get("sellerType"), seller.get("sellerType"),
+        seller.get("seller_type"), seller.get("type"),
+    )
+    if any(isinstance(v, str) and v.strip().casefold() in business_types
+           for v in values):
+        return True
+    for value in (raw.get("seller_name"), raw.get("sellerName"),
+                  seller.get("name"), seller.get("sellerName")):
+        if isinstance(value, str) and 0 < len(value.strip()) <= 180:
+            if seller_evidence({"seller_name": value})["seller_type"] == "handelaar":
+                return True
+    return False
+
 
 def is_trade_model(title):
     """Never mix unrelated brands into this dealership's 16-brand shortlist."""
@@ -211,11 +242,7 @@ def normalize(raw,source,now,provider_at=None):
     # Business evidence always overrides a conflicting private flag.
     seller_fields={str(raw.get(field) or "").strip().casefold()
                    for field in ("seller_type","seller_platform_type","sellerType")}
-    if seller_fields & {
-        "handelaar","zakelijk","business","business_seller","dealer",
-        "dealership","professional","trader","company",
-        "commercial","autobedrijf","garagebedrijf"
-    }:return None
+    if business_seller_evidence(raw):return None
     seller=("particulier" if seller_fields & {
         "particulier","private","private_seller","individual","consumer"
     } else "onbekend")
