@@ -900,6 +900,46 @@ class StandaloneRuntimeTests(unittest.TestCase):
                     apify.verify_free_headroom(
                         "safe-token-value-1234567", 0.05, opener)
 
+    def test_apify_preflight_classifies_failures_without_leaking_provider_data(self):
+        from urllib.error import HTTPError, URLError
+
+        token = "safe-token-value-1234567"
+
+        class FailedOpener:
+            def __init__(self, error):
+                self.error = error
+                self.calls = []
+            def open(self, request, timeout):
+                self.calls.append((request.get_method(), request.full_url))
+                raise self.error
+
+        cases = [
+            (HTTPError(apify.ACCOUNT_LIMITS, 401, "sensitive", None, None),
+             "apify_account_http_401"),
+            (HTTPError(apify.ACCOUNT_LIMITS, 403, "sensitive", None, None),
+             "apify_account_http_403"),
+            (HTTPError(apify.ACCOUNT_LIMITS, 429, "sensitive", None, None),
+             "apify_account_http_429"),
+            (HTTPError(apify.ACCOUNT_LIMITS, 503, "sensitive", None, None),
+             "apify_account_http_5xx"),
+            (HTTPError(apify.ACCOUNT_LIMITS, 418, "sensitive", None, None),
+             "apify_account_http_other"),
+            (URLError("sensitive network details"),
+             "apify_account_network_unavailable"),
+        ]
+        for error, expected in cases:
+            with self.subTest(expected=expected):
+                opener = FailedOpener(error)
+                with self.assertRaises(ValueError) as caught:
+                    apify.verify_free_headroom(token, 0.05, opener=opener)
+                self.assertEqual(str(caught.exception), expected)
+                self.assertEqual(opener.calls, [("GET", apify.ACCOUNT_LIMITS)])
+                self.assertEqual(runtime.provider_preflight_label(
+                    {"preflight_reason": expected}), expected)
+                self.assertNotIn("sensitive", str(caught.exception))
+        self.assertIsNone(runtime.provider_preflight_label(
+            {"preflight_reason": "TOKEN: sensitive"}))
+
     def test_unverifiable_credits_never_start_paid_actor(self):
         env = {"AET_FACEBOOK_ENABLED":"true",
                "APIFY_TOKEN":"safe-token-value-1234567"}
