@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
-from marktplaats_data import parse_mileage, photo_urls
+from marktplaats_data import parse_mileage, photo_urls, seller_evidence
 
 FORMAT="aet-pro.hunter.v1"
 DEST=Path(os.environ.get("AET_HUNTER_STATE_DIR", Path(__file__).resolve().parent))/"hunter_pro_export.json"
@@ -40,7 +40,11 @@ DEFINITELY_TOO_FAR = frozenset({
 def clearly_outside_almere_area(location):
     if not isinstance(location, str):
         return False
+    # Listings often append province abbreviations: "Groningen (GR)".
+    # Strip only the bounded parenthetical suffix; do not infer a route
+    # distance or accidentally reject nearby places sharing a substring.
     city = location.strip().casefold().split(",")[0].strip()
+    city = re.sub(r"\s*\([^()]{1,24}\)\s*$", "", city).strip()
     return city in DEFINITELY_TOO_FAR
 
 def candidate(row,archive=False):
@@ -48,10 +52,23 @@ def candidate(row,archive=False):
     if clearly_outside_almere_area(row.get("location")):return None
     locator=canonical(row.get("url"))
     if not locator:return None
-    km=parse_mileage(row.get("mileage_km",row.get("mileage")))
-    if km is not None and km>330000:return None
-    seller=row.get("seller_type")
-    if seller not in ("particulier","onbekend"):return None
+    # Never accept a falsely low primary odometer when another observed
+    # field is >330k or materially contradictory. The old get(default)
+    # also lost the valid 'mileage' fallback when 'mileage_km' existed as None.
+    measurements = [
+        parse_mileage(row.get(field))
+        for field in ("mileage_km", "mileage", "search_card_mileage_hint_km")
+    ]
+    readings = [value for value in measurements if value is not None]
+    if readings and (max(readings)>330000 or
+                     max(readings)-min(readings)>max(1000,round(max(readings)*0.01))):
+        return None
+    km = max(readings) if readings else None
+    # Recompute seller evidence at the final export boundary. A stale
+    # 'particulier' field must never override a business platform flag or
+    # a clearly recognizable dealer name.
+    seller = seller_evidence(row)["seller_type"]
+    if seller not in ("particulier", "onbekend"):return None
     kind=row.get("price_type")
     search=row.get("source")=="marktplaats_search_card" or row.get("potential_category")=="zoekkaart"
     # Only confirmed fixed prices or genuine bidding listings may reach AET Pro.
@@ -59,7 +76,7 @@ def candidate(row,archive=False):
     if kind not in ("FIXED", "MIN_BID", "FAST_BID"):return None
     if search:return None  # Search-card hints are not verified seller prices.
     price=row.get("price")
-    if kind=="FIXED" and not search and (not amount(price) or price>3000):return None
+    if kind=="FIXED" and not search and (not amount(price) or not 350<=price<=3000):return None
     if search and (not amount(price) or price>3000):return None
     floor=row.get("minimum_bid_eur")
     if kind in ("MIN_BID", "FAST_BID") and (not amount(floor) or not 350<=floor<=3000):return None
@@ -74,8 +91,16 @@ def candidate(row,archive=False):
     resale=row.get("indicative_resale_eur")
     issues=row.get("potential_notes")
     issues=issues if isinstance(issues,list) else []
-    year=row.get("year") or row.get("year_detected")
-    if not isinstance(year,int) or isinstance(year,bool) or not 1950<=year<=2030:year=None
+    def valid_year(raw):
+        if isinstance(raw, str) and re.fullmatch(r"\d{4}", raw.strip()):
+            raw = int(raw.strip())
+        return raw if type(raw) is int and 1950 <= raw <= 2030 else None
+    year_original = valid_year(row.get("year"))
+    year_detected = valid_year(row.get("year_detected"))
+    if (year_original is not None and year_detected is not None
+            and year_original != year_detected):
+        return None
+    year = year_original if year_original is not None else year_detected
     # Search-card and detail pipelines can contain both an image list and
     # a separate cover. Preserve either safe image, even if the list contains
     # stale/invalid URLs. photo_urls() validates origin and removes duplicates.
