@@ -111,7 +111,7 @@ class HunterTests(unittest.TestCase):
         self.assertEqual(normal["year"], 2011)
         # A present-but-null preferred field must retain the real reading.
         self.assertEqual(candidate({**base, "mileage_km": None})["mileage_km"], 180000)
-        self.assertEqual(candidate({**base, "mileage_km": 182000})["mileage_km"], 182000)
+        self.assertEqual(candidate({**base, "mileage_km": 181000})["mileage_km"], 181000)
         self.assertIsNone(candidate({**base, "mileage_km": 340000}))
         self.assertIsNone(candidate({**base, "mileage": 340000,
                                      "mileage_km": 180000}))
