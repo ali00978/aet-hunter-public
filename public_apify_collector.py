@@ -650,6 +650,24 @@ def load_pending_actor(root):
     return data
 
 
+def trusted_facebook_listing_id(url):
+    """Return only a validated, canonical Facebook marketplace listing ID."""
+    if not isinstance(url, str) or len(url) > 600:
+        return None
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or
+                parsed.hostname not in ("www.facebook.com", "facebook.com",
+                                        "m.facebook.com") or
+                parsed.username or parsed.password or
+                parsed.port not in (None, 443)):
+            return None
+    except ValueError:
+        return None
+    match = re.fullmatch(r"/marketplace/item/([0-9]+)/?", parsed.path)
+    return match.group(1) if match else None
+
+
 def collect(root, env, persist, request_fn=None, now=None, account_check=None, recovery_fn=None):
     """Fail closed without losing good history or resetting charge counters."""
     import facebook_hunter
@@ -795,6 +813,7 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
             if not isinstance(history, dict):
                 raise ValueError("Invalid Facebook history structure")
             accepted = {}
+            unavailable_ids = set()
             allowed = ("id", "url", "title", "price", "city", "location",
                        "listedAt", "listed_at", "year", "year_detected",
                        "mileage_km", "mileage", "seller_type", "description",
@@ -809,6 +828,13 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 if not isinstance(raw, dict):
                     continue
                 if raw.get("isSold") is True or raw.get("isPending") is True:
+                    # An explicit SOLD/PENDING observation overrides a
+                    # cached 'available' record even if the provider yields
+                    # no other usable car this run. Never infer that missing
+                    # items are sold.
+                    sold_id = trusted_facebook_listing_id(raw.get("url"))
+                    if sold_id is not None:
+                        unavailable_ids.add(sold_id)
                     continue
                 url = raw.get("url")
                 if not isinstance(url, str) or len(url) > 600:
@@ -869,7 +895,13 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                     accepted[car["id"]] = normalized
                     if not first_seen:
                         history[url] = now.isoformat()
+            # The same ID can occur in both a live and a sold provider row.
+            # Fail closed on the explicit unavailable status regardless of
+            # the order of rows returned by the provider.
+            for sold_id in unavailable_ids:
+                accepted.pop("facebook:" + sold_id, None)
             status.update({"received": len(rows), "accepted": len(accepted),
+                           "explicit_unavailable": len(unavailable_ids),
                            "new_candidates": sum(
                                r["first_seen_at"] == now.isoformat()
                                for r in accepted.values())})
@@ -878,8 +910,25 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 atomic_json(root / "apify_kandidaten.json", list(accepted.values()))
                 status["status"] = "ok"
             else:
-                # The provider returned irrelevant parts or malformed entries,
-                # not proof that all historical cars have vanished.
+                # No valid currently available cars is not proof that every
+                # old listing disappeared. Explicitly sold/pending IDs ARE
+                # evidence, however: prune only those IDs from the cache,
+                # preserving all other historic research without treating
+                # this empty batch as a successful sync.
+                cached_path = root / "apify_kandidaten.json"
+                if unavailable_ids and cached_path.exists():
+                    cached = json.loads(cached_path.read_text(encoding="utf-8"))
+                    if not isinstance(cached, list) or len(cached) > 4000:
+                        raise ValueError("Invalid saved Facebook candidate cache")
+                    remaining = [
+                        row for row in cached
+                        if not (isinstance(row, dict) and
+                                trusted_facebook_listing_id(row.get("url"))
+                                in unavailable_ids)
+                    ]
+                    if len(remaining) != len(cached):
+                        atomic_json(cached_path, remaining)
+                        status["cached_sold_removed"] = len(cached)-len(remaining)
                 status["status"] = "no_vehicle_candidates"
     except PendingActorError:
         status.update({"status":"provider_pending",
