@@ -1247,6 +1247,50 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertEqual(empty["status"],"empty_response")
             self.assertEqual(json.loads((root/"apify_kandidaten.json").read_text()),saved)
 
+    def test_apify_first_seen_is_stable_across_url_tracking_variants(self):
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        earliest = (now-timedelta(days=18)).isoformat()
+        later = (now-timedelta(days=3)).isoformat()
+        base = "https://www.facebook.com/marketplace/item/98980011/"
+        history = {
+            base+"?ref=feed": later,
+            "https://m.facebook.com/marketplace/item/98980011/?ref=share": earliest,
+        }
+        vehicle = {"url":base, "title":"Toyota Aygo 2012", "price":950,
+                   "listedAt":now.isoformat()}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            apify.atomic_json(root/"apify_seen.json", history)
+            status = apify.collect(
+                folder, env, lambda:None, now=now,
+                request_fn=lambda *_:[vehicle],
+                account_check=lambda *_:True)
+            self.assertEqual(status["status"], "ok")
+            self.assertEqual(status["new_candidates"], 0)
+            saved = json.loads((root/"apify_kandidaten.json").read_text())
+            self.assertEqual(saved[0]["first_seen_at"], earliest)
+            self.assertEqual(saved[0]["checked_at"], now.isoformat())
+
+    def test_new_facebook_tracking_url_is_saved_under_canonical_history_key(self):
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        canonical = "https://www.facebook.com/marketplace/item/98980012/"
+        row = {"url": canonical+"?ref=feed", "title":"Toyota Aygo 2012",
+               "price":950, "listedAt": now.isoformat()}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            status = apify.collect(
+                folder, env, lambda:None, now=now,
+                request_fn=lambda *_:[row],
+                account_check=lambda *_:True)
+            self.assertEqual(status["new_candidates"], 1)
+            state = json.loads((root/"apify_seen.json").read_text())
+            self.assertEqual(state[canonical], now.isoformat())
+            self.assertNotIn(row["url"], state)
+
     def test_provider_http_429_creates_real_cooldown_without_second_request(self):
         from urllib.error import HTTPError
         env = {"AET_FACEBOOK_ENABLED":"true",
