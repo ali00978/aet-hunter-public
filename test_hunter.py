@@ -9,6 +9,38 @@ from seller_filter import seller_type
 from scanner import search_structured_prices, search_card_signals, search_card_priority, parse, extract_fields, choose_detail_links, select_diverse_detail_links, purchase_review_tier, extract_vehicle_year, interleave_search_results, parse_price_eur, is_financing_offer, buying_opportunity, listing_requires_manual_description_check
 
 class HunterTests(unittest.TestCase):
+    def test_detail_request_budget_favors_fixed_prices_over_bid_research(self):
+        from scanner import (bound_detail_research_mix, detail_research_category,
+                             BID_RESEARCH_DETAIL_CAP, REFERENCE_DETAIL_CAP,
+                             UNKNOWN_DETAIL_CAP)
+        def link(i):
+            return f"https://www.marktplaats.nl/v/auto-s/opel/m{910000+i}-test"
+        fixed = [link(i) for i in range(40)]
+        bids = [link(100+i) for i in range(60)]
+        reference = [link(200+i) for i in range(70)]
+        unknown = [link(300+i) for i in range(50)]
+        facts = {
+            **{url: {'price_type':'FIXED', 'price':950,
+                      'seller_type':'particulier'} for url in fixed},
+            **{url: {'price_type':'MIN_BID', 'minimum_bid_eur':450,
+                      'seller_type':'particulier'} for url in bids},
+            **{url: {'price_type':'FIXED', 'price':4800,
+                      'seller_type':'handelaar'} for url in reference},
+            **{url: {'price_type':None, 'price':None,
+                      'seller_type':'onbekend'} for url in unknown},
+        }
+        chosen, counts = bound_detail_research_mix(
+            bids + unknown + reference + fixed, facts, limit=110)
+        self.assertEqual(counts['affordable_fixed'], 40)
+        self.assertEqual(counts['bid_or_request'], BID_RESEARCH_DETAIL_CAP)
+        self.assertEqual(counts['reference'], REFERENCE_DETAIL_CAP)
+        self.assertEqual(counts['unknown'], UNKNOWN_DETAIL_CAP)
+        self.assertEqual(len(chosen), 40 + BID_RESEARCH_DETAIL_CAP +
+                         REFERENCE_DETAIL_CAP + UNKNOWN_DETAIL_CAP)
+        self.assertTrue(all(detail_research_category(url, facts) ==
+                            'affordable_fixed' for url in chosen[:40]))
+        self.assertEqual(len(chosen), len(set(chosen)))
+
     def test_export_prioritizes_prices_and_limits_bidding(self):
         from hunter_pro_export import build_payload
         from datetime import datetime, timezone
