@@ -828,6 +828,31 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                         seen_by_id[listing_id] = (first_dt, first)
             accepted = {}
             unavailable_ids = set()
+            cached_path = root / "apify_kandidaten.json"
+            try:
+                cached = json.loads(cached_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                cached = []
+            except (OSError, ValueError):
+                raise ValueError("Invalid saved Facebook candidate cache") from None
+            if not isinstance(cached, list) or len(cached) > 4000:
+                raise ValueError("Invalid saved Facebook candidate cache")
+            # Retain recent SOLD/PENDING evidence across subsequent healthy
+            # Apify runs. Otherwise an older Social Fetch observation could
+            # resurrect a car after the newer Apify cache is overwritten.
+            tombstones = {}
+            for previous_row in cached:
+                if not isinstance(previous_row, dict) or not (
+                        previous_row.get("isSold") is True or
+                        previous_row.get("isPending") is True):
+                    continue
+                old_id = trusted_facebook_listing_id(previous_row.get("url"))
+                observed = facebook_hunter.when(previous_row.get("checked_at"))
+                if old_id and observed and (
+                        timedelta(0) <= now-observed <= facebook_hunter.MAX_AGE):
+                    prior = tombstones.get(old_id)
+                    if prior is None or observed > prior[0]:
+                        tombstones[old_id] = (observed, previous_row)
             allowed = ("id", "url", "title", "price", "city", "location",
                        "listedAt", "listed_at", "year", "year_detected",
                        "mileage_km", "mileage", "seller_type", "description",
@@ -922,6 +947,20 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
             # the order of rows returned by the provider.
             for sold_id in unavailable_ids:
                 accepted.pop("facebook:" + sold_id, None)
+            # A truly newer confirmed available page may supersede a
+            # previous unavailable signal. A SOLD/PENDING row seen during
+            # this very scan takes precedence over either state.
+            for live_id in accepted:
+                tombstones.pop(live_id.removeprefix("facebook:"), None)
+            for sold_id in unavailable_ids:
+                tombstones[sold_id] = (
+                    now, {"url": "https://www.facebook.com/marketplace/item/"
+                          + sold_id + "/", "isSold": True,
+                          "checked_at": now.isoformat()})
+            retained_tombstones = [
+                row for _, row in sorted(tombstones.values(),
+                                         key=lambda pair: pair[0])[-600:]
+            ]
             status.update({"received": len(rows), "accepted": len(accepted),
                            "explicit_unavailable": len(unavailable_ids),
                            "new_candidates": sum(
@@ -929,7 +968,8 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                                for r in accepted.values())})
             if accepted:
                 atomic_json(history_path, dict(list(history.items())[-4000:]))
-                atomic_json(root / "apify_kandidaten.json", list(accepted.values()))
+                atomic_json(cached_path, list(accepted.values()) +
+                            retained_tombstones)
                 status["status"] = "ok"
             else:
                 # No valid currently available cars is not proof that every
@@ -937,20 +977,19 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 # evidence, however: prune only those IDs from the cache,
                 # preserving all other historic research without treating
                 # this empty batch as a successful sync.
-                cached_path = root / "apify_kandidaten.json"
-                if unavailable_ids and cached_path.exists():
-                    cached = json.loads(cached_path.read_text(encoding="utf-8"))
-                    if not isinstance(cached, list) or len(cached) > 4000:
-                        raise ValueError("Invalid saved Facebook candidate cache")
+                if unavailable_ids:
                     remaining = [
                         row for row in cached
                         if not (isinstance(row, dict) and
-                                trusted_facebook_listing_id(row.get("url"))
-                                in unavailable_ids)
+                                (row.get("isSold") is True or
+                                 row.get("isPending") is True or
+                                 trusted_facebook_listing_id(row.get("url"))
+                                 in unavailable_ids))
                     ]
-                    if len(remaining) != len(cached):
-                        atomic_json(cached_path, remaining)
-                        status["cached_sold_removed"] = len(cached)-len(remaining)
+                    removed = len(cached)-len(remaining)
+                    atomic_json(cached_path, remaining + retained_tombstones)
+                    if removed:
+                        status["cached_sold_removed"] = removed
                 status["status"] = "no_vehicle_candidates"
     except PendingActorError:
         status.update({"status":"provider_pending",
