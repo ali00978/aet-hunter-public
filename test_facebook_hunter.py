@@ -33,6 +33,25 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
                            "Apify",self.now)
         self.assertEqual(valid["seller_classification"],"particulier")
 
+    def test_business_name_and_nested_seller_flags_override_private_claim(self):
+        hidden_dealers = (
+            {"seller_type": "particulier", "sellerName": "Garage de Markt"},
+            {"sellerType": "PRIVATE_SELLER", "seller_name": "Autobedrijf West B.V."},
+            {"seller_type": "particulier",
+             "seller": {"name": "Occasion Center Almere"}},
+            {"seller_type": "particulier", "seller": {"type": "company"}},
+            {"seller_type": "particulier", "seller_platform_type": "business_seller"},
+        )
+        for fields in hidden_dealers:
+            with self.subTest(fields=fields):
+                self.assertTrue(fb.business_seller_evidence(fields))
+                self.assertIsNone(fb.normalize(
+                    {**self.good, **fields}, "Apify", self.now))
+        private = {**self.good, "seller_type": "particulier",
+                   "sellerName": "Jan de Vries"}
+        self.assertFalse(fb.business_seller_evidence(private))
+        self.assertIsNotNone(fb.normalize(private, "Apify", self.now))
+
     def test_conflicting_odometer_readings_cannot_be_hidden(self):
         for fields in ({"mileage_km":80000,"mileage":340000},
                        {"mileage_km":340000,"mileage":80000},

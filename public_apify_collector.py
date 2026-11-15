@@ -813,6 +813,12 @@ def collect(root, env, persist, request_fn=None, now=None, account_check=None, r
                 url = raw.get("url")
                 if not isinstance(url, str) or len(url) > 600:
                     continue
+                # HydeData's PRIVATE_SELLER flag must not overwrite a more
+                # reliable business name or conflicting seller_type signal.
+                # Inspect the original record BEFORE whitelisting fields;
+                # do not save seller names into provider state or public logs.
+                if facebook_hunter.business_seller_evidence(raw):
+                    continue
                 first_seen = history.get(url)
                 normalized = {key: raw[key] for key in allowed if key in raw}
                 # Retain only short public price labels/types, so the

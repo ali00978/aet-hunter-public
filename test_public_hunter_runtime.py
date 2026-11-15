@@ -1315,6 +1315,35 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertEqual(status["status"], "empty_response")
             self.assertGreaterEqual(len(order), 2)
 
+    def test_apify_collector_does_not_save_hidden_dealers_or_seller_names(self):
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        def make(i, **fields):
+            return {"id": str(i),
+                    "url": f"https://www.facebook.com/marketplace/item/{i}/",
+                    "title": "Opel Corsa 2012",
+                    "listedAt": now.isoformat(), "price": 1250,
+                    "sellerType": "PRIVATE_SELLER", **fields}
+        rows = [
+            make(8711001, sellerName="Autobedrijf West B.V."),
+            make(8711002, seller_type="handelaar"),
+            make(8711003, seller={"name": "Garage de Markt"}),
+            make(8711004, sellerName="Jan de Vries"),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            status = apify.collect(
+                d, env, lambda: None, now=now,
+                request_fn=lambda *_: rows, account_check=lambda *_: True)
+            self.assertEqual(status["status"], "ok")
+            self.assertEqual(status["accepted"], 1)
+            saved = json.loads((Path(d) / "apify_kandidaten.json").read_text())
+            self.assertEqual(len(saved), 1)
+            self.assertTrue(saved[0]["url"].endswith("/8711004/"))
+            self.assertEqual(saved[0]["seller_type"], "particulier")
+            self.assertNotIn("sellerName", saved[0])
+            self.assertNotIn("seller", saved[0])
+
     def test_real_hydedata_output_includes_photo_and_private_seller(self):
         env = {"AET_FACEBOOK_ENABLED": "true",
                "APIFY_TOKEN": "safe-token-value-1234567"}
