@@ -487,6 +487,35 @@ class StandaloneRuntimeTests(unittest.TestCase):
 
 
 
+    def test_previous_green_marktplaats_status_cannot_be_reused_by_failed_scan(self):
+        import scanner
+        import hunter_sync
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "marktplaats_status.json").write_text(json.dumps({
+                "checked_at": now.isoformat(), "scan_health": "ok",
+                "candidate_count": 5}), encoding="utf-8")
+            env = {
+                "AET_MODAL_LIVE_ENABLED": "I_ACCEPT_LIVE_SCANS",
+                "AET_PRO_SYNC_URL":
+                  "https://aet-cars-pro.eltakech100.workers.dev/api/integrations/hunter/sync",
+                "AET_HUNTER_SYNC_TOKEN": "x" * 26,
+                "AET_HUNTER_STATE_DIR": folder,
+            }
+            sent = []
+            # Simulate a scanner that returns normally WITHOUT writing a
+            # new status file. The old status is only seconds old and green.
+            with (patch.object(scanner, "main", return_value=None),
+                  patch.object(hunter_sync, "send",
+                               side_effect=lambda *args: sent.append(args)),
+                  patch.object(runtime, "receiver_marktplaats_limit",
+                               return_value=30)):
+                result = runtime.run_platform("marktplaats", env=env)
+            self.assertEqual(result, "unhealthy")
+            self.assertEqual(sent, [])
+            self.assertFalse((root / "hunter_pro_combined.json").exists())
+
     def test_archived_marktplaats_research_does_not_reappear_as_new_pro_leads(self):
         """A healthy empty scan may preserve a historical snapshot, never a new lead."""
         import scanner

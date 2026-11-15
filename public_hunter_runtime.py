@@ -351,6 +351,17 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
         os.chdir(root)
         if platform == "marktplaats":
             import scanner
+            # An earlier healthy encrypted checkpoint is not proof that THIS
+            # invocation completed. The scanner must write a new status file
+            # before any old candidates can be synchronized as fresh.
+            status_path = root / "marktplaats_status.json"
+            try:
+                previous_status = status_path.stat()
+                previous_marker = (previous_status.st_ino,
+                                   previous_status.st_mtime_ns,
+                                   previous_status.st_size)
+            except FileNotFoundError:
+                previous_marker = None
             try:
                 with open(os.devnull, "w", encoding="utf-8") as sink:
                     with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -358,7 +369,16 @@ def run_platform(platform, persist=lambda: None, reload=lambda: None, env=None):
             finally:
                 # Keep restriction cooldown and history even if scanner fails.
                 persist()
-            status = load_object(root / "marktplaats_status.json")
+            status = load_object(status_path)
+            new_stat = status_path.stat()
+            new_marker = (new_stat.st_ino, new_stat.st_mtime_ns,
+                          new_stat.st_size)
+            if previous_marker is not None and new_marker == previous_marker:
+                # Fail closed if scanner.main() silently returned early and
+                # left yesterday's successful health flag untouched.
+                print("marktplaats: scan_health=ongewijzigde_status_vorige_scan",
+                      flush=True)
+                return "unhealthy"
             totals = safe_scan_counters(status)
             if totals:
                 print("marktplaats: pagina's=" + str(totals[0]) +
