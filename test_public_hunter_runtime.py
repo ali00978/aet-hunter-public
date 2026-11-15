@@ -1288,6 +1288,65 @@ class StandaloneRuntimeTests(unittest.TestCase):
                 self.assertEqual(outcome["status"], expected)
                 self.assertEqual(json.loads((Path(d)/"apify_kandidaten.json").read_text()),old)
 
+    def test_all_sold_facebook_batch_prunes_only_explicit_ids(self):
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        old = [
+            {"url": "https://www.facebook.com/marketplace/item/8761001/",
+             "title": "Toyota Aygo 2012", "price": 800},
+            {"url": "https://www.facebook.com/marketplace/item/8761002/",
+             "title": "Opel Corsa 2011", "price": 900},
+            {"url": "https://www.facebook.com/marketplace/item/8761003/",
+             "title": "Peugeot 107 2009", "price": 1000}
+        ]
+        gone = [
+            {"url": "https://m.facebook.com/marketplace/item/8761001/?ref=feed",
+             "isSold": True},
+            {"url": "https://www.facebook.com/marketplace/item/8761003/",
+             "isPending": True},
+            {"url": "https://other.example/marketplace/item/8761002/",
+             "isSold": True},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "apify_kandidaten.json"
+            path.write_text(json.dumps(old), encoding="utf-8")
+            status = apify.collect(
+                d, env, lambda: None, now=now,
+                request_fn=lambda *_: gone,
+                account_check=lambda *_: True)
+            self.assertEqual(status["status"], "no_vehicle_candidates")
+            self.assertEqual(status["explicit_unavailable"], 2)
+            self.assertEqual(status["cached_sold_removed"], 2)
+            self.assertEqual(json.loads(path.read_text()), [old[1]])
+
+    def test_sold_wins_over_available_same_facebook_id(self):
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        live = {
+            "url": "https://www.facebook.com/marketplace/item/8762001/",
+            "title": "Toyota Aygo 2012", "price": 900,
+            "listedAt": now.isoformat()
+        }
+        unaffected = {
+            **live, "url": "https://www.facebook.com/marketplace/item/8762002/"
+        }
+        for rows in ([live, {**live, "isSold": True}, unaffected],
+                     [{**live, "isSold": True}, live, unaffected]):
+            with self.subTest(order=rows[0].get("isSold", False)):
+                with tempfile.TemporaryDirectory() as d:
+                    status = apify.collect(
+                        d, env, lambda: None, now=now,
+                        request_fn=lambda *_: rows,
+                        account_check=lambda *_: True)
+                    self.assertEqual(status["status"], "ok")
+                    self.assertEqual(status["accepted"], 1)
+                    saved = json.loads(
+                        (Path(d) / "apify_kandidaten.json").read_text())
+                    self.assertEqual(len(saved), 1)
+                    self.assertEqual(saved[0]["url"], unaffected["url"])
+
     def test_same_dutch_price_parser_in_facebook_and_marktplaats(self):
         from facebook_hunter import money
         self.assertEqual(money("€ 1.250,00"), 1250)
