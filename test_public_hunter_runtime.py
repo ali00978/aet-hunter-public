@@ -1362,7 +1362,10 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertEqual(status["status"], "no_vehicle_candidates")
             self.assertEqual(status["explicit_unavailable"], 2)
             self.assertEqual(status["cached_sold_removed"], 2)
-            self.assertEqual(json.loads(path.read_text()), [old[1]])
+            saved = json.loads(path.read_text())
+            self.assertEqual([r for r in saved if not r.get("isSold")], [old[1]])
+            tombstones = [r for r in saved if r.get("isSold") is True]
+            self.assertEqual(len(tombstones), 2)
 
     def test_sold_wins_over_available_same_facebook_id(self):
         env = {"AET_FACEBOOK_ENABLED": "true",
@@ -1388,8 +1391,67 @@ class StandaloneRuntimeTests(unittest.TestCase):
                     self.assertEqual(status["accepted"], 1)
                     saved = json.loads(
                         (Path(d) / "apify_kandidaten.json").read_text())
-                    self.assertEqual(len(saved), 1)
-                    self.assertEqual(saved[0]["url"], unaffected["url"])
+                    live_rows = [row for row in saved if not row.get("isSold")]
+                    self.assertEqual(len(live_rows), 1)
+                    self.assertEqual(live_rows[0]["url"], unaffected["url"])
+                    self.assertEqual(sum(r.get("isSold") is True for r in saved), 1)
+
+    def test_facebook_sold_tombstone_survives_and_suppresses_other_provider(self):
+        import facebook_hunter as fb
+        env = {"AET_FACEBOOK_ENABLED": "true",
+               "APIFY_TOKEN": "safe-token-value-1234567"}
+        now = datetime.now(timezone.utc)
+        older = (now-timedelta(days=2)).isoformat()
+        sold = "https://www.facebook.com/marketplace/item/88999001/"
+        other = "https://www.facebook.com/marketplace/item/88999002/"
+        original = {"url": sold, "title": "Toyota Aygo 2012",
+                    "price": 950, "seller_type": "particulier",
+                    "listedAt": older, "first_seen_at": older,
+                    "checked_at": older}
+        fresh = {"url": other, "title": "Opel Corsa 2012",
+                 "price": 1250, "seller_type": "particulier",
+                 "listedAt": now.isoformat()}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/"socialfetch_kandidaten.json").write_text(
+                json.dumps([original]))
+            (root/"socialfetch_status.json").write_text(
+                json.dumps({"status":"ok", "checked_at":older}))
+            first = apify.collect(
+                d, env, lambda:None, now=now,
+                request_fn=lambda *_:[{"url":sold,"isSold":True}],
+                account_check=lambda *_:True)
+            self.assertEqual(first["status"], "no_vehicle_candidates")
+            with patch.object(fb, "ROOT", root):
+                initial = fb.find_candidates(now=now)
+            self.assertNotIn("facebook:88999001",
+                             {r["id"] for r in initial["candidates"]})
+            # A later healthy Apify scan with an unrelated car must retain
+            # the SOLD evidence instead of resurrecting Social Fetch stock.
+            second = apify.collect(
+                d, env, lambda:None, now=now+timedelta(minutes=10),
+                request_fn=lambda *_:[fresh],
+                account_check=lambda *_:True)
+            self.assertEqual(second["status"], "ok")
+            with patch.object(fb, "ROOT", root):
+                after = fb.find_candidates(now=now+timedelta(minutes=10))
+            self.assertEqual(
+                {r["id"] for r in after["candidates"]},
+                {"facebook:88999002"})
+            stored = json.loads((root/"apify_kandidaten.json").read_text())
+            self.assertEqual(sum(r.get("isSold") is True for r in stored), 1)
+            # A genuinely NEWER successful available observation may
+            # supersede old sold evidence after the listing reopens.
+            reopened = {**original, "listedAt":now.isoformat()}
+            third = apify.collect(
+                d, env, lambda:None, now=now+timedelta(hours=1),
+                request_fn=lambda *_:[reopened],
+                account_check=lambda *_:True)
+            self.assertEqual(third["status"], "ok")
+            with patch.object(fb, "ROOT", root):
+                new_result = fb.find_candidates(now=now+timedelta(hours=1))
+            self.assertIn("facebook:88999001",
+                          {r["id"] for r in new_result["candidates"]})
 
     def test_same_dutch_price_parser_in_facebook_and_marktplaats(self):
         from facebook_hunter import money
@@ -1474,9 +1536,11 @@ class StandaloneRuntimeTests(unittest.TestCase):
             self.assertEqual(status["status"], "ok")
             self.assertEqual(status["accepted"], 1)
             cars = json.loads((Path(d) / "apify_kandidaten.json").read_text())
-            self.assertEqual(len(cars), 1)
-            self.assertEqual(cars[0]["seller_type"], "particulier")
-            self.assertEqual(cars[0]["photo_urls"], [photo])
+            live_cars = [r for r in cars if r.get("isSold") is not True]
+            self.assertEqual(len(live_cars), 1)
+            self.assertEqual(live_cars[0]["seller_type"], "particulier")
+            self.assertEqual(live_cars[0]["photo_urls"], [photo])
+            self.assertEqual(sum(r.get("isSold") is True for r in cars), 1)
 
 
 
