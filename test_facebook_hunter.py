@@ -103,6 +103,22 @@ class FacebookHunterIntegrationTests(unittest.TestCase):
                     "Apify", self.now))
         self.assertIsNotNone(fb.normalize(self.good, "Apify", self.now))
 
+    def test_facebook_foreign_currency_and_suffix_price_labels_fail_closed(self):
+        for label in ("$ 1,200", "£ 1,200", "1200 USD",
+                      "GBP 1200", "1.200 CHF", "€ 1.200 /maand",
+                      "€ 1.200 per month", "2.500 EUR", "€ 1200; $ 950",
+                      "2.500"):
+            with self.subTest(label=label):
+                for field in ("priceFormatted", "priceText", "priceLabel"):
+                    self.assertIsNone(fb.normalize(
+                        {**self.good, field: label}, "Apify", self.now))
+        for label in ("1200 EUR", "1.200 EUR", "1.200 €",
+                      "1.200", "EUR 1.200", "€ 1.200"):
+            with self.subTest(agreed_price=label):
+                self.assertIsNotNone(fb.normalize(
+                    {**self.good, "priceFormatted": label},
+                    "Apify", self.now))
+
     def test_price_mileage_seller_unknown_flagged(self):
         r=fb.normalize(self.good,"Apify",self.now)
         self.assertEqual(r["id"],"facebook:11111111111")
