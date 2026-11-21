@@ -47,6 +47,35 @@ class HunterTests(unittest.TestCase):
         self.assertEqual(count, 7)
         self.assertEqual(len(small), 7)
 
+    def test_refill_prefers_strong_market_gap_hint_over_generic_price(self):
+        from scanner import refill_after_research_caps
+        now = datetime.now(timezone.utc).timestamp()
+        def link(i):
+            return f"https://www.marktplaats.nl/v/auto-s/opel/m{887000+i}-corsa"
+        urls = [link(i) for i in range(26)]
+        facts = {url: {'title':'Opel Corsa 2014',
+                       'price_type':'FIXED', 'price':950,
+                       'year':2014, 'mileage_km':140000,
+                       'seller_type':'particulier'}
+                 for url in urls}
+        # A high-confidence market-gap hint can be near the end of the
+        # original discovery queue, and otherwise miss the 20-slot refill.
+        exceptional = urls[-1]
+        priorities = {url:(-2,950) for url in urls}
+        priorities[exceptional] = (-5,950)
+        with_priority, count = refill_after_research_caps(
+            [], [urls], facts, {}, {}, now, limit=30,
+            priorities=priorities)
+        self.assertEqual(count, 20)
+        self.assertEqual(with_priority[0], exceptional)
+        self.assertEqual(len(set(with_priority)), 20)
+        without_priority, count = refill_after_research_caps(
+            [], [urls], facts, {}, {}, now, limit=30)
+        self.assertEqual(count, 20)
+        self.assertNotIn(exceptional, without_priority)
+        # The outer 145-request limit and all per-ad detail checks are
+        # unchanged by this purely local ordering improvement.
+
     def test_detail_request_budget_favors_fixed_prices_over_bid_research(self):
         from scanner import (bound_detail_research_mix, detail_research_category,
                              BID_RESEARCH_DETAIL_CAP, REFERENCE_DETAIL_CAP,
