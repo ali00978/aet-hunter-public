@@ -9,6 +9,44 @@ from seller_filter import seller_type
 from scanner import search_structured_prices, search_card_signals, search_card_priority, parse, extract_fields, choose_detail_links, select_diverse_detail_links, purchase_review_tier, extract_vehicle_year, interleave_search_results, parse_price_eur, is_financing_offer, buying_opportunity, listing_requires_manual_description_check
 
 class HunterTests(unittest.TestCase):
+    def test_spare_detail_capacity_goes_to_safe_fixed_price_cars(self):
+        from scanner import refill_after_research_caps, MAX_TOTAL_REQUESTS
+        now = datetime.now(timezone.utc).timestamp()
+        def link(i):
+            return f"https://www.marktplaats.nl/v/auto-s/opel/m{991000+i}-corsa"
+        eligible = [link(i) for i in range(26)]
+        bids = [link(100+i) for i in range(10)]
+        facts = {
+            **{url: {'title': 'Opel Corsa 2014',
+                      'description': 'Goed onderhouden auto',
+                      'price_type': 'FIXED', 'price': 950,
+                      'year': 2014, 'mileage_km': 140000,
+                      'seller_type': 'particulier'} for url in eligible},
+            **{url: {'title': 'Opel Corsa 2014',
+                      'price_type': 'MIN_BID', 'minimum_bid_eur': 400,
+                      'seller_type': 'particulier'} for url in bids},
+        }
+        chosen, added = refill_after_research_caps(
+            [], [bids + eligible], facts, {}, {}, now, limit=30)
+        self.assertEqual(added, 20)
+        self.assertEqual(len(chosen), 20)
+        self.assertEqual(len(set(chosen)), 20)
+        self.assertTrue(set(chosen) <= set(eligible))
+        self.assertLessEqual(len(chosen), MAX_TOTAL_REQUESTS)
+        # A previously checked car must never bypass the 6-hour cooldown
+        # merely because there is spare budget.
+        blocked = {eligible[0]: datetime.now(timezone.utc).isoformat()}
+        newer, count = refill_after_research_caps(
+            [], [eligible], facts, blocked, {}, now,
+            limit=30, max_added=99)
+        self.assertEqual(count, 20)
+        self.assertNotIn(eligible[0], newer)
+        # Do not silently exceed a caller's smaller hard cap.
+        small, count = refill_after_research_caps(
+            [], [eligible], facts, {}, {}, now, limit=7)
+        self.assertEqual(count, 7)
+        self.assertEqual(len(small), 7)
+
     def test_detail_request_budget_favors_fixed_prices_over_bid_research(self):
         from scanner import (bound_detail_research_mix, detail_research_category,
                              BID_RESEARCH_DETAIL_CAP, REFERENCE_DETAIL_CAP,

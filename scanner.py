@@ -601,15 +601,26 @@ def ranked_search_card(fact, card_text, already_checked=False, market_gap_rank=N
 
 def search_card_market_gap_rank(url, fact, card_text=''):
     """Rank detail requests only, never certify a bargain or sale price."""
-    if not isinstance(fact, dict) or fact.get('price_type') != 'FIXED':
+    if not isinstance(fact, dict) or fact.get('price_type') not in (None, 'FIXED'):
         return None
-    # A structured FIXED advert may omit priceCents even when the visible
-    # search card clearly shows the asking price. Use that unverified hint
-    # solely to order the NEXT detail request; never claim a confirmed margin.
+    # Untyped platform records can still display an affordable asking-price
+    # hint on their public card. Use that hint solely for the NEXT detail
+    # request; it is never evidence of a verified sale price or margin.
+    if search_card_bid_or_request(card_text):
+        return None
     hints = search_card_signals(card_text)
     price = fact.get('price')
-    if price is None:
-        price = hints.get('price')
+    visible_price = hints.get('price')
+    if fact.get('price_type') is None:
+        # Without structured FIXED evidence require an unambiguous visible
+        # card price; never trust an unlabeled bid floor.
+        if visible_price is None or (price is not None and price != visible_price):
+            return None
+        price = visible_price
+    elif price is None:
+        price = visible_price
+    elif visible_price is not None and visible_price != price:
+        return None
     if (isinstance(price, bool) or not finite_numeric_state(price)
             or not 350 <= price <= MAX_BUY_PRICE
             or fact.get('reserved') or fact.get('seller_type') == 'handelaar'
@@ -621,7 +632,8 @@ def search_card_market_gap_rank(url, fact, card_text=''):
         year = hints.get('year')
     if km is None:
         km = hints.get('mileage_km')
-    if year is None or km is None or warnings or km > MAX_PURCHASE_MILEAGE_KM:
+    if (year is None or year < MIN_YEAR or km is None
+            or warnings or km > MAX_PURCHASE_MILEAGE_KM):
         return None
     try:
         comparison = market_comparison({
@@ -2070,17 +2082,17 @@ def bound_detail_research_mix(
 
 
 def refill_after_research_caps(selected, groups, facts, history, cooldown, now_ts,
-                               limit, cached_urls=None, target_models=None, max_added=8):
-    """Reuse at most eight detail slots lost to the final research-mix caps.
+                               limit, cached_urls=None, target_models=None, max_added=20):
+    """Reuse up to twenty detail slots lost to the final research-mix caps.
 
     The previous refill happened BEFORE excluding excess bids and weak
-    references. A full provisional selection could shrink from 107 to 80
-    requests, leaving useful fixed-price research untouched. This helper
-    operates entirely on known URLs and respects the original eligibility,
-    fixed category caps, pacing, and total request budget.
+    references. A provisional selection may shrink sharply, leaving
+    eligible fixed-price research unchecked. Use more of the already
+    approved detail budget, without extra searches, shorter pacing,
+    bypassed cooldowns or a higher global request ceiling.
     """
     selected = list(selected)[:limit]
-    max_added = max(0, min(8, max_added, limit-len(selected)))
+    max_added = max(0, min(20, max_added, limit-len(selected)))
     if max_added == 0:
         return selected, 0
     facts = facts if isinstance(facts, dict) else {}

@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -469,6 +470,44 @@ class FreshDiscoveryRegressionTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(
             scanner.choose_motivated_query(base, history, rotation=4), base)
+
+    def test_untyped_visible_fixed_price_can_get_comparable_based_detail_priority(self):
+        from unittest.mock import patch
+        fact = {'price_type': None, 'price': None,
+                'title': 'Opel Corsa 1.2 2014',
+                'seller_type': 'particulier',
+                'year': 2014, 'mileage_km': 135000}
+        comparison = {'status': 'indicatieve_vraagprijzen',
+                      'sample_size': 5, 'high_price_dispersion': False,
+                      'median_asking_price_eur': 2800}
+        with patch.object(scanner, 'market_comparison',
+                          return_value=comparison) as lookup:
+            rank = scanner.search_card_market_gap_rank(
+                URL, fact, 'Opel Corsa 2014 135.000 km € 1.000')
+            self.assertEqual(rank, -5)
+            self.assertEqual(lookup.call_count, 1)
+            self.assertEqual(lookup.call_args.args[0]['price'], 1000)
+            for label, changed in (
+                ('Bieden vanaf € 1.000', {}),
+                ('€ 1.000 per maand', {}),
+                ('Opel Corsa € 1.000 of € 2.000', {}),
+                ('Opel Corsa € 1.000', {'price': 1700}),
+                ('Opel Corsa € 1.000', {'price_type': 'MIN_BID'}),
+                ('Opel Corsa € 1.000', {'year': 2007}),
+                ('Opel Corsa € 1.000', {'mileage_km': 340000}),
+                ('Opel Corsa € 1.000', {'seller_type': 'handelaar'}),
+            ):
+                with self.subTest(label=label, changed=changed):
+                    self.assertIsNone(scanner.search_card_market_gap_rank(
+                        URL, {**fact, **changed}, label))
+            self.assertEqual(lookup.call_count, 1)
+        # The score controls request order only: untyped hints cannot be
+        # exported as confirmed FIXED asking prices.
+        from hunter_pro_export import candidate
+        self.assertIsNone(candidate({
+            'url':URL, 'price_type':None, 'price':1000,
+            'seller_type':'particulier',
+            'checked_at':datetime.now(timezone.utc).isoformat()}))
 
     def test_missing_structured_fixed_price_can_rank_by_observed_card_hint(self):
         from unittest.mock import patch
