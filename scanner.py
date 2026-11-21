@@ -2648,7 +2648,7 @@ def prioritize_undelivered_purchase_details(selected, groups, history, cooldown,
     If new eligible stock is genuinely exhausted, retain the original plan.
     """
     selected = list(selected)[:limit]
-    if not delivered_ids or not groups or limit <= 0:
+    if not groups or limit <= 0:
         return selected, 0
     # Delivery checkpoints use "marktplaats:m123", whereas the scanner's
     # listing_id(url) returns "m123". Compare the SAME canonical identity,
