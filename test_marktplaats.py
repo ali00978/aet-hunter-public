@@ -22,6 +22,28 @@ def vehicle(url=URL, price=1250, **fields):
             'offers': {'price': price, 'priceCurrency': 'EUR'}, **fields}
 
 class MarktplaatsTests(unittest.TestCase):
+    def test_first_run_prioritizes_affordable_cars_without_delivery_history(self):
+        # A newly installed Hunter has no delivered IDs yet. The priority
+        # queue must still use its existing budget for real buy candidates.
+        reference = "https://www.marktplaats.nl/v/auto-s/opel/m8111-reference"
+        affordable = "https://www.marktplaats.nl/v/auto-s/opel/m8222-affordable"
+        facts = {
+            reference: {"price_type": "FIXED", "price": 9000},
+            affordable: {"price_type": "FIXED", "price": 1200},
+        }
+        with (patch.object(scanner, "select_diverse_detail_links",
+                           return_value=[affordable]),
+              patch.object(scanner, "detail_research_category",
+                           side_effect=lambda url, _: (
+                               "affordable_fixed" if url == affordable else "reference")),
+              patch.object(scanner, "unsafe_for_purchase_shortlist",
+                           return_value=False)):
+            chosen, added = scanner.prioritize_undelivered_purchase_details(
+                [reference], [[affordable]], {}, {}, 1000, facts,
+                set(), 1)
+        self.assertEqual(chosen, [affordable])
+        self.assertEqual(added, 1)
+
     def test_state_json_is_compact_and_preserves_comparables(self):
         # Production retains large private archives behind a 4 MB file cap.
         # Whitespace must not consume that cap or discard comparison records.
