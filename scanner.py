@@ -2082,7 +2082,8 @@ def bound_detail_research_mix(
 
 
 def refill_after_research_caps(selected, groups, facts, history, cooldown, now_ts,
-                               limit, cached_urls=None, target_models=None, max_added=20):
+                               limit, cached_urls=None, target_models=None, max_added=20,
+                               priorities=None):
     """Reuse up to twenty detail slots lost to the final research-mix caps.
 
     The previous refill happened BEFORE excluding excess bids and weak
@@ -2096,6 +2097,7 @@ def refill_after_research_caps(selected, groups, facts, history, cooldown, now_t
     if max_added == 0:
         return selected, 0
     facts = facts if isinstance(facts, dict) else {}
+    priorities = priorities if isinstance(priorities, dict) else {}
     target_models = set(target_models or ())
     caps = {'bid_or_request': BID_RESEARCH_DETAIL_CAP,
             'reference': REFERENCE_DETAIL_CAP,
@@ -2109,7 +2111,7 @@ def refill_after_research_caps(selected, groups, facts, history, cooldown, now_t
     eligible = select_diverse_detail_links(
         groups, history, cooldown, now_ts,
         limit=sum(len(group) for group in groups), cached_urls=cached_urls,
-        facts=facts)
+        priorities=priorities, facts=facts)
     ranked = []
     for pos, url in enumerate(eligible):
         if listing_id(url) in used or not approved_listing_brand(url):
@@ -3291,7 +3293,7 @@ def main():
     detail_links, post_mix_slots_refilled = refill_after_research_caps(
         detail_links, search_groups, search_facts, last_checked, cooldown,
         time.time(), detail_budget, cached_urls=cached_urls,
-        target_models=reference_model_targets)
+        target_models=reference_model_targets, priorities=card_priorities)
     for url in detail_links[before_post_mix_refill:]:
         kind = detail_research_category(url, search_facts)
         detail_selection_mix[kind] = detail_selection_mix.get(kind, 0) + 1
