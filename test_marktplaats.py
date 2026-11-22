@@ -44,6 +44,31 @@ class MarktplaatsTests(unittest.TestCase):
         self.assertEqual(chosen, [affordable])
         self.assertEqual(added, 1)
 
+    def test_verified_fixed_price_gets_detail_slots_before_unverified_hints(self):
+        # Existing hint-only selections once consumed the 80% purchase
+        # allowance before fresh fixed-price alternatives could enter it.
+        hint1 = URL.replace("m123", "m81001")
+        hint2 = URL.replace("m123", "m81002")
+        reference = URL.replace("m123", "m81003")
+        fixed1 = URL.replace("m123", "m81004")
+        fixed2 = URL.replace("m123", "m81005")
+        facts = {url: {"price_type": "FIXED", "price": 1200}
+                 for url in (fixed1, fixed2)}
+        facts.update({url: {"price_type": None, "price": None,
+                            "search_card_price_hint_eur": 1300}
+                      for url in (hint1, hint2)})
+        facts[reference] = {"price_type": "FIXED", "price": 9000}
+        with (patch.object(scanner, "select_diverse_detail_links",
+                           return_value=[fixed1, fixed2]),
+              patch.object(scanner, "unsafe_for_purchase_shortlist",
+                           return_value=False)):
+            chosen, added = scanner.prioritize_undelivered_purchase_details(
+                [hint1, hint2, reference], [[fixed1, fixed2]],
+                {}, {}, 1000, facts, set(), 3)
+        self.assertEqual(chosen, [fixed1, fixed2, hint1])
+        self.assertEqual(added, 2)
+        self.assertEqual(len(chosen), 3)
+
     def test_state_json_is_compact_and_preserves_comparables(self):
         # Production retains large private archives behind a 4 MB file cap.
         # Whitespace must not consume that cap or discard comparison records.
