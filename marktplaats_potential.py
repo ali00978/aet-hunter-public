@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from car_triage import HIGH_RISK, vehicle_identity, estimated_trade_costs, extra_checks
 from marktplaats_data import seller_evidence, vehicle_facts
 from marktplaats_market import extra_repair_reserve, listing_id, technical_risk_signals, minimum_profit
+from hunter_pro_export import clearly_outside_almere_area
 
 CATEGORIES = {
     'vaste_prijs': 'Interessante vraagprijs',
@@ -69,6 +70,12 @@ def _candidate(row, now, max_price, diagnostics=None):
     url = row.get('url')
     if not approved_listing_brand(url or '') or row.get('reserved') or row.get('unavailable') or row.get('severe_technical_risk') or over_purchase_mileage_limit(row) or is_financing_offer(row) or row.get('buyer_queue') in ('uitsluiten', 'buiten_budget', 'reparatieproject'):
         return reject('invalid_or_excluded')
+    # Enforce the same clear out-of-area rejection at the shortlist boundary
+    # as the final AET Pro export. Otherwise far-away ads can use the 300-card
+    # selection cap and model slots, silently hiding viable local cars.
+    # This is not a substitute for a verified 90-minute driving-time check.
+    if clearly_outside_almere_area(row.get('location')):
+        return reject('outside_almere_area')
     search = row.get('source') == 'marktplaats_search_card'
     try:
         stamp = datetime.fromisoformat(str(row.get('discovered_at') if search else row.get('checked_at')).replace('Z','+00:00'))

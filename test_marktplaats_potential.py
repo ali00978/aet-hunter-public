@@ -42,6 +42,24 @@ class PotentialCandidateTests(unittest.TestCase):
         self.assertEqual(diagnostics['unique_after_filter'],1)
         self.assertEqual(diagnostics['selected_unknown_seller'],1)
 
+    def test_distant_ads_cannot_hide_local_cars_before_delivery_cap(self):
+        # Export already rejects these cities; reject earlier as well so six
+        # cheap remote listings cannot crowd out two viable local vehicles.
+        remote = [self.car(93000+i, location="Groningen", price=350+i)
+                  for i in range(6)]
+        local = [self.car(94001, location="Almere", price=1000),
+                 self.car(94002, location="Lelystad", price=1100)]
+        diagnostics = {}
+        found = select_potential_candidates(
+            remote + local, [], limit=3, now=self.now,
+            diagnostics=diagnostics)
+        self.assertEqual(len(found), 2)
+        self.assertEqual({r['location'] for r in found},
+                         {"Almere", "Lelystad"})
+        self.assertEqual(diagnostics['outside_almere_area'], 6)
+        from hunter_pro_export import candidate
+        self.assertTrue(all(candidate(r) is not None for r in found))
+
     def test_bounded_300_local_candidate_pool_without_affecting_default(self):
         rows=[self.car(15000+i,price=900) for i in range(320)]
         normal=select_potential_candidates(rows,[],now=self.now)

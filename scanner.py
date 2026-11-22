@@ -2680,6 +2680,12 @@ def prioritize_undelivered_purchase_details(selected, groups, history, cooldown,
             continue
         best.append(url)
         used.add(key)
+    # A price visible as a FIXED asking price is stronger evidence for a
+    # purchase check than a still-unverified search-card price hint. The
+    # former must win the 80% purchase budget even when the original queue
+    # already contains enough hint-only cards to fill that allowance.
+    # Python's stable sort preserves the existing ranking within each tier.
+    best.sort(key=lambda url: detail_research_category(url, facts) != 'affordable_fixed')
     budget = max(1, (limit * 4) // 5)
     promoted = best[:budget]
     used = {listing_id(url) for url in promoted}
